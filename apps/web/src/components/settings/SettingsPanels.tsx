@@ -105,7 +105,7 @@ import { isMacPlatform } from "../../lib/utils";
 import { useEnvironmentProviders } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
-import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { RelativeTime } from "../RelativeTime";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
@@ -3510,16 +3510,16 @@ export function ArchivedThreadsPanel() {
                 description={
                   <span className={hasMultipleEnvironments ? "block truncate" : undefined}>
                     {hasMultipleEnvironments ? `${thread.environmentLabel} · ` : null}
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                    Archived <RelativeTime timestamp={thread.archivedAt ?? thread.createdAt} />
                     {" \u00b7 Created "}
-                    {formatRelativeTimeLabel(thread.createdAt)}
+                    <RelativeTime timestamp={thread.createdAt} />
                   </span>
                 }
                 control={
                   <Button
                     type="button"
                     variant="outline"
-                    size="xs"
+                    size="sm"
                     className="shrink-0"
                     onClick={() => {
                       void (async () => {
