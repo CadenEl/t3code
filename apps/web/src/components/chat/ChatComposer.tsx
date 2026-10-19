@@ -2332,13 +2332,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
   const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
   const disabledSkills = resolveProjectSettings(settings, activeProjectId).settings.disabledSkills;
-  const selectedProviderSkills = getProviderSkillsForSlashMenu(
+  const disabledSkillNames = new Set(disabledSkills.map((name) => name.toLowerCase()));
+  const selectedProviderSkills = (
     selectedProviderStatus
       ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
-      : NO_PROVIDER_SKILLS,
-    true,
-    disabledSkills,
-  );
+      : NO_PROVIDER_SKILLS
+  ).filter((skill) => !disabledSkillNames.has(skill.name.toLowerCase()));
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
     : NO_PROVIDER_SLASH_COMMANDS;

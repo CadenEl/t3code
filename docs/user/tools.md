@@ -12,7 +12,7 @@ selected project, your personal folders (such as `~/.agents/skills` and `~/.clau
 plugins. A skill is listed once even when several folders or agents have it.
 
 Turning a skill off removes it from the composer's skill menu and hides it from Claude, Codex and
-OpenCode 1.x sessions. Cursor, Grok, Antigravity, Pi and OpenCode 2 have no way to hide one skill,
+OpenCode 1.x sessions. Cursor, Grok, Antigravity, Pi, Muse and OpenCode 2 have no way to hide one skill,
 so they may still use it on their own. A skill switched off in the agent's own settings shows as
 off and can't be turned on here.
 
@@ -21,7 +21,7 @@ skill off for one project, or back on where the environment has it off.
 
 ## MCP servers
 
-The **MCP servers** tab lists servers T3 Code adds to every agent session, next to its own
+The **MCP servers** tab lists servers T3 Code adds to supported agent sessions, next to its own
 `t3-code` server and the servers each agent already loads from its own config, which keep working
 unchanged. T3 Code never edits those config files.
 
@@ -36,4 +36,6 @@ environment server replaces it for the project, which is how to point a project 
 account. Inherited servers can be switched off for the project without removing them elsewhere.
 
 Claude, Codex, Cursor, OpenCode, Grok and other ACP agents get these servers. ACP agents that don't
-support URL servers only get command servers. Pi isn't supported yet.
+support URL servers only get command servers. Pi and Muse aren't supported yet. OpenCode 1
+connections using an external server URL don't receive these servers: that server retains dynamic
+configuration after the T3 session ends. Configure MCP in that external server directly.

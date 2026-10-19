@@ -85,7 +85,7 @@ describe("MCP server editor", () => {
   });
 });
 
-it("preserves each target's credential when a shared server edit leaves it untouched", () => {
+it("preserves different destination headers in a URL-only bulk edit", () => {
   const initial = {
     type: "http" as const,
     url: "https://example.com/mcp",
@@ -93,12 +93,57 @@ it("preserves each target's credential when a shared server edit leaves it untou
   };
   const local = {
     ...initial,
+    headers: [{ name: "X-Api-Key", value: "", sensitive: true, valueRedacted: true }],
+  };
+  const edited = { ...initial, url: "https://changed.example/mcp" };
+  expect(mcpServerTransportForTarget(edited, initial, initial)).toEqual(edited);
+  expect(mcpServerTransportForTarget(edited, initial, local)).toEqual({
+    ...local,
+    url: edited.url,
+  });
+  expect(mcpServerTransportForTarget(edited, initial, local, "docs")).toEqual({
+    ...local,
+    url: edited.url,
+    headers: [{ ...local.headers[0], storedAs: { server: "docs", variable: "X-Api-Key" } }],
+  });
+
+  const sameHeader = {
+    ...initial,
     headers: [{ name: "Authorization", value: "local-token", sensitive: false }],
   };
-  expect(mcpServerTransportForTarget(initial, initial, local)).toEqual(local);
+  expect(mcpServerTransportForTarget(edited, initial, sameHeader)).toEqual({
+    ...sameHeader,
+    url: edited.url,
+  });
+
+  expect(() =>
+    mcpServerTransportForTarget(edited, initial, {
+      type: "stdio",
+      command: "native-tool",
+      args: [],
+      env: [{ name: "API_KEY", value: "", sensitive: true, valueRedacted: true }],
+    }),
+  ).toThrow("each environment");
+
   const replaced = {
-    ...initial,
+    ...edited,
     headers: [{ name: "Authorization", value: "replacement", sensitive: true }],
   };
-  expect(mcpServerTransportForTarget(replaced, initial, local)).toEqual(replaced);
+  expect(() => mcpServerTransportForTarget(replaced, initial, local)).toThrow("each environment");
+  expect(mcpServerTransportForTarget(replaced, initial, initial)).toEqual(replaced);
+  expect(mcpServerTransportForTarget({ ...edited, headers: [] }, initial, initial)).toEqual({
+    ...edited,
+    headers: [],
+  });
+  const renamed = {
+    ...edited,
+    headers: [
+      {
+        ...initial.headers[0]!,
+        name: "New-Authorization",
+        storedAs: { server: "docs", variable: "Authorization" },
+      },
+    ],
+  };
+  expect(mcpServerTransportForTarget(renamed, initial, initial)).toEqual(renamed);
 });

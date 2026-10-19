@@ -375,38 +375,78 @@ function variablesFromDrafts(
   });
 }
 
-// A bulk edit keeps each environment's credentials until the user replaces that field.
+// Keep destination credentials when the shared edit only changed the command or URL.
 export function mcpServerTransportForTarget(
   edited: McpServerTransport,
   initial: McpServerTransport | undefined,
   target: McpServerTransport | undefined,
+  renamedFrom?: string,
 ): McpServerTransport {
+  if (initial && target && initial.type !== target.type) {
+    throw new Error("Transports differ across environments. Edit this server in each environment.");
+  }
   if (!initial || !target || initial.type !== edited.type || target.type !== edited.type)
     return edited;
   const variables = (transport: McpServerTransport) =>
     transport.type === "stdio" ? transport.env : transport.headers;
-  const before = new Map(variables(initial).map((variable) => [variable.name, variable]));
-  const current = new Map(variables(target).map((variable) => [variable.name, variable]));
-  const mapped = variables(edited).map((variable) => {
-    const sourceName = variable.storedAs?.variable ?? variable.name;
-    const original = before.get(sourceName);
-    const local = current.get(sourceName);
+  const original = variables(initial);
+  const next = variables(edited);
+  const local = variables(target);
+  const unchanged =
+    next.length === original.length &&
+    next.every((variable, index) => {
+      const before = original[index]!;
+      return (
+        variable.name === before.name &&
+        variable.value === before.value &&
+        variable.sensitive === before.sensitive &&
+        Boolean(variable.valueRedacted) === Boolean(before.valueRedacted)
+      );
+    });
+  let mapped: ReadonlyArray<McpServerVariable>;
+  if (unchanged) {
+    const sourceServer =
+      renamedFrom ?? next.find((variable) => variable.storedAs)?.storedAs?.server;
+    mapped = local.map((variable) => ({
+      ...variable,
+      ...(sourceServer && variable.valueRedacted
+        ? {
+            storedAs: { server: sourceServer, variable: variable.name },
+          }
+        : {}),
+    }));
+  } else {
     if (
-      !original ||
-      !local ||
-      original.value !== variable.value ||
-      original.sensitive !== variable.sensitive
-    )
-      return variable;
-    const { valueRedacted: _redacted, storedAs, ...rest } = variable;
-    return {
-      ...rest,
-      value: local.value,
-      sensitive: local.sensitive,
-      ...(local.valueRedacted ? { valueRedacted: true } : {}),
-      ...(storedAs && local.valueRedacted ? { storedAs } : {}),
-    };
-  });
+      original.length !== local.length ||
+      original.some((variable, index) => variable.name !== local[index]?.name)
+    ) {
+      throw new Error(
+        "Credentials differ across environments. Edit this server in each environment.",
+      );
+    }
+    const before = new Map(original.map((variable) => [variable.name, variable]));
+    const current = new Map(local.map((variable) => [variable.name, variable]));
+    mapped = next.map((variable) => {
+      const sourceName = variable.storedAs?.variable ?? variable.name;
+      const previous = before.get(sourceName);
+      const destination = current.get(sourceName);
+      if (
+        !previous ||
+        !destination ||
+        previous.value !== variable.value ||
+        previous.sensitive !== variable.sensitive
+      )
+        return variable;
+      const { valueRedacted: _redacted, storedAs, ...rest } = variable;
+      return {
+        ...rest,
+        value: destination.value,
+        sensitive: destination.sensitive,
+        ...(destination.valueRedacted ? { valueRedacted: true } : {}),
+        ...(storedAs && destination.valueRedacted ? { storedAs } : {}),
+      };
+    });
+  }
   return edited.type === "stdio" ? { ...edited, env: mapped } : { ...edited, headers: mapped };
 }
 

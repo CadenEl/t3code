@@ -62,6 +62,7 @@ interface ToolsTarget {
   readonly label: string;
   readonly projectId: ProjectId | null;
   readonly cwd: string | null;
+  readonly supportsAgentTools: boolean;
 }
 
 function useToolsTargets(): ReadonlyArray<ToolsTarget> {
@@ -79,6 +80,8 @@ function useToolsTargets(): ReadonlyArray<ToolsTarget> {
               label: environment.label,
               projectId: member.id,
               cwd: member.workspaceRoot,
+              supportsAgentTools:
+                environment.serverConfig?.environment.capabilities.agentTools === true,
             },
           ]
         : [];
@@ -89,6 +92,7 @@ function useToolsTargets(): ReadonlyArray<ToolsTarget> {
     label: environment.label,
     projectId: null,
     cwd: null,
+    supportsAgentTools: environment.serverConfig?.environment.capabilities.agentTools === true,
   }));
 }
 
@@ -116,13 +120,29 @@ function usePersistToolsPatch() {
   ) => {
     for (const target of targets) {
       const save = async () => {
-        const pushed = appAtomRegistry.get(
-          serverEnvironment.configValueAtom(target.environmentId),
-        )?.settings;
-        if (!pushed) return;
+        const config = appAtomRegistry.get(serverEnvironment.configValueAtom(target.environmentId));
+        if (!config?.environment.capabilities.agentTools) {
+          toastManager.add({
+            type: "warning",
+            title: "Tools not saved",
+            description: `Update ${target.label} to manage skills and MCP servers.`,
+          });
+          return;
+        }
+        const pushed = config.settings;
         const pending = written.current.get(target.environmentId);
         const settings = pending?.base === pushed ? pending.next : pushed;
-        const patch = apply({ settings, projectId: target.projectId });
+        let patch: ServerSettingsPatch | null;
+        try {
+          patch = apply({ settings, projectId: target.projectId });
+        } catch (error) {
+          toastManager.add({
+            type: "warning",
+            title: "Tools not saved",
+            description: error instanceof Error ? error.message : "Could not update tools.",
+          });
+          return;
+        }
         if (patch === null) return;
         const missing = requiredScopesForServerSettingsPatch(patch, settings).find(
           (scope) => !readEnvironmentScope(target.environmentId, scope),
@@ -168,11 +188,9 @@ function projectOverridePatch<K extends "mcpServers" | "disabledSkills">(
   key: K,
   value: Readonly<Record<string, unknown>>,
 ): ServerSettingsPatch {
-  const { [key]: _previous, ...rest } = settings.projectSettingsOverrides[projectId] ?? {};
-  const next = Object.keys(value).length === 0 ? rest : { ...rest, [key]: value };
   return {
     projectSettingsOverrides: {
-      [projectId]: Object.keys(next).length === 0 ? null : next,
+      [projectId]: { ...settings.projectSettingsOverrides[projectId], [key]: value },
     },
   } as ServerSettingsPatch;
 }
@@ -185,6 +203,7 @@ export function ToolsSettings({
   readonly onTabChange: (tab: ToolsTab) => void;
 }) {
   const selectTab = onTabChange;
+  const unsupported = useToolsTargets().filter((target) => !target.supportsAgentTools);
   return (
     <SettingsPageContainer>
       <div className="px-3 sm:px-4">
@@ -201,7 +220,18 @@ export function ToolsSettings({
           <Toggle value="mcp">MCP servers</Toggle>
         </ToggleGroup>
       </div>
-      {tab === "mcp" ? <McpServersPanel /> : <SkillsPanel />}
+      {unsupported.length > 0 ? (
+        <SettingsSection title="Update environment">
+          <SettingsRow
+            title="Tools settings need a newer server"
+            description={`Update ${[...new Set(unsupported.map((target) => target.label))].join(", ")} to manage skills and MCP servers for this scope.`}
+          />
+        </SettingsSection>
+      ) : tab === "mcp" ? (
+        <McpServersPanel />
+      ) : (
+        <SkillsPanel />
+      )}
     </SettingsPageContainer>
   );
 }
@@ -268,7 +298,9 @@ function SkillsPanel() {
       }
       const switches = { ...settings.projectSettingsOverrides[projectId]?.disabledSkills };
       const inheritedOff = isSkillDisabled(settings.disabledSkills, name);
-      delete switches[name];
+      for (const key of Object.keys(switches)) {
+        if (key.toLowerCase() === name.toLowerCase()) delete switches[key];
+      }
       // A switch that matches the environment is not an override.
       if (disabled !== inheritedOff) switches[name] = disabled;
       return projectOverridePatch(settings, projectId, "disabledSkills", switches);
@@ -357,8 +389,9 @@ function SkillsPanel() {
         ))
       )}
       <p className="px-3 text-xs text-muted-foreground sm:px-4">
-        Turning a skill off hides it from Claude, Codex and OpenCode, and from the composer's skill
-        menu. Other agents may still load it on their own. Changes apply to new sessions.
+        Turning a skill off hides it from Claude, Codex and OpenCode 1, and from the composer's
+        skill menu. Cursor, Grok, Antigravity, Pi, Muse and OpenCode 2 may still load it on their
+        own. Changes apply to new sessions.
       </p>
     </>
   );
@@ -471,7 +504,29 @@ function McpServersPanel() {
     transport: McpServerTransport,
     enabled: boolean,
     previousName?: string,
-  ) =>
+  ) => {
+    const initial = editor?.mode === "edit" ? editor.row.config.transport : undefined;
+    const renamedFrom = previousName !== name ? previousName : undefined;
+    try {
+      for (const target of targets) {
+        const settings = connectedEnvironments.find(
+          (environment) => environment.environmentId === target.environmentId,
+        )?.serverConfig?.settings;
+        const existing =
+          target.projectId === null
+            ? settings?.mcpServers
+            : settings?.projectSettingsOverrides[target.projectId]?.mcpServers;
+        const destination = existing?.[previousName ?? name]?.transport;
+        if (destination) mcpServerTransportForTarget(transport, initial, destination, renamedFrom);
+      }
+    } catch (error) {
+      toastManager.add({
+        type: "warning",
+        title: "Tools not saved",
+        description: error instanceof Error ? error.message : "Could not update tools.",
+      });
+      return false;
+    }
     persist(({ settings, projectId: targetProject }) => {
       const existing =
         targetProject === null
@@ -484,8 +539,9 @@ function McpServersPanel() {
       }
       const targetTransport = mcpServerTransportForTarget(
         transport,
-        editor?.mode === "edit" ? editor.row.config.transport : undefined,
+        initial,
         existing[previousName ?? name]?.transport,
+        renamedFrom,
       );
       if (targetProject === null) {
         return {
@@ -502,6 +558,8 @@ function McpServersPanel() {
       entries[name] = { enabled, transport: targetTransport };
       return projectOverridePatch(settings, targetProject, "mcpServers", entries);
     });
+    return true;
+  };
 
   const setEnabled = (row: McpServerRow, enabled: boolean) =>
     persist(({ settings, projectId: targetProject }) => {
@@ -570,7 +628,7 @@ function McpServersPanel() {
             description={
               isProjectScope
                 ? "Add one here to give only this project's agents a server, or to point a shared server at a different account."
-                : "Servers added here reach every agent, next to the servers each agent already loads from its own config."
+                : "Servers added here reach supported agents, next to the servers each agent already loads from its own config."
             }
           />
         ) : (
@@ -609,8 +667,8 @@ function McpServersPanel() {
       ) : (
         <p className="px-3 text-xs text-muted-foreground sm:px-4">
           Servers you add here are given to Claude, Codex, Cursor, OpenCode, Grok and other ACP
-          agents. Pi isn't supported yet. Changes apply to new sessions; use Restart agent session
-          to pick them up in an open thread.
+          agents. Pi, Muse and external OpenCode 1 servers aren't supported. Changes apply to new
+          sessions; use Restart agent session to pick them up in an open thread.
         </p>
       )}
       {editor ? (
@@ -647,13 +705,13 @@ function McpServersPanel() {
             )
           }
           onSave={({ name, transport }) => {
-            writeServer(
+            const saved = writeServer(
               name,
               transport,
               editor.mode === "edit" ? editor.row.config.enabled : true,
               editor.mode === "edit" ? editor.row.name : undefined,
             );
-            setEditor(null);
+            if (saved) setEditor(null);
           }}
         />
       ) : null}
