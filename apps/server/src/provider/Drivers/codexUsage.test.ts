@@ -100,6 +100,14 @@ describe("parseCodexLine", () => {
     const request = counters(100, 20);
     expect(parseCodexLine(counted(request, request), state)?.totals.outputTokens).toBe(20);
     expect(parseCodexLine(counted(counters(20, 5), request), state)).toBeNull();
+    expect(
+      parseCodexLine(
+        counted({ ...counters(0, 0), total_tokens: 20330 }, request, {
+          model_context_window: 258400,
+        }),
+        state,
+      ),
+    ).toBeNull();
     expect(parseCodexLine(counted(request, counters(200, 40)), state)?.totals.outputTokens).toBe(
       20,
     );
