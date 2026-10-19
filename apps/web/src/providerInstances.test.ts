@@ -1,4 +1,9 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   applyProviderInstanceSettings,
@@ -487,8 +492,7 @@ describe("getDefaultProviderInstanceModel", () => {
       providers,
       ProviderInstanceId.make("claudeAgent"),
     );
-    expect(typeof resolved).toBe("string");
-    expect(resolved?.length).toBeGreaterThan(0);
+    expect(resolved).toBe(DEFAULT_MODEL_BY_PROVIDER[ProviderDriverKind.make("claudeAgent")]);
   });
 
   it("honors the instance's declared default before model-list order", () => {
