@@ -1,11 +1,15 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import { assert, it, vi } from "@effect/vitest";
-import { ProjectId } from "@t3tools/contracts";
+import { assert, expect, it, vi } from "@effect/vitest";
+import { EventId, ProjectId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as SqlClient from "effect/sql/SqlClient";
 
+import { idleThreadProjection, liveThreadShell } from "../mcp/McpToolAccess.testkit.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as Sqlite from "../persistence/Sqlite.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectService from "./ProjectService.ts";
@@ -69,7 +73,9 @@ it.effect("resolves setup scripts through the standalone project service", () =>
     updatedAt: "2026-06-20T00:00:00.000Z",
     deletedAt: null,
   };
+  const projections = ProjectionStore.layer.pipe(Layer.provideMerge(Sqlite.layerMemory));
   const layer = ProjectSetupScriptRunner.layer.pipe(
+    Layer.provideMerge(projections),
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectService.ProjectService)({
@@ -177,5 +183,58 @@ it.effect("resolves setup scripts through the standalone project service", () =>
       threadId: "thread-1",
       terminalId: observedTerminalId,
     });
+
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    for (const [name, origin] of [
+      ["auto", { sessionId: "link", label: "Laptop", access: "auto" as const }],
+      ["legacy", { sessionId: "link", label: "Laptop" }],
+      ["full", { sessionId: "trusted", label: "Desktop", access: "full-access" as const }],
+      ["ordinary", undefined],
+    ] as const) {
+      const threadId = ThreadId.make(`setup:${name}`);
+      const thread = idleThreadProjection(liveThreadShell(threadId)).thread;
+      yield* store.apply({
+        id: EventId.make(`setup:${name}:created`),
+        type: "thread.created",
+        threadId,
+        occurredAt: thread.createdAt,
+        payload: { ...thread, ...(origin === undefined ? {} : { linkOrigin: origin }) },
+      });
+      for (const trigger of ["worktree-create", "settle"] as const) {
+        const opened = open.mock.calls.length;
+        const written = write.mock.calls.length;
+        const result = yield* runner.runForThread({
+          threadId,
+          projectId,
+          worktreePath: "/repo-worktree",
+          ...(trigger === "settle" ? { trigger } : {}),
+        });
+        const fenced = name === "auto" || name === "legacy";
+        expect
+          .soft(result.status, `${name}/${trigger}`)
+          .toBe(fenced ? "skipped-for-link" : "started");
+        expect.soft(open.mock.calls.length - opened).toBe(fenced ? 0 : 1);
+        expect.soft(write.mock.calls.length - written).toBe(fenced ? 0 : 1);
+      }
+    }
+    // An unreadable stored thread must not be treated like the missing thread above.
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = 'invalid'
+      WHERE thread_id = 'setup:ordinary'`;
+    const opened = open.mock.calls.length;
+    const written = write.mock.calls.length;
+    const unread = yield* runner
+      .runForThread({
+        threadId: "setup:ordinary",
+        projectId,
+        worktreePath: "/repo-worktree",
+      })
+      .pipe(Effect.result);
+    expect.soft(unread).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "ProjectSetupScriptOperationError" },
+    });
+    expect.soft(open.mock.calls.length).toBe(opened);
+    expect.soft(write.mock.calls.length).toBe(written);
   }).pipe(Effect.provide(layer));
 });

@@ -29,7 +29,7 @@ import {
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import * as CodexClient from "effect-codex-app-server/client";
@@ -7886,15 +7886,23 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         const harness = yield* makeCodexReplayHarness(resumeSubagentTranscript);
         const now = yield* DateTime.now;
 
-        yield* harness.runtime.startTurn(
-          makeCodexTestTurnInput({
-            threadId: harness.threadId,
-            providerThread: harness.providerThread,
-            now,
-            attemptId: RunAttemptId.make("attempt-codex-resume"),
-            text: RESUME_PROMPT,
-          }),
-        );
+        const turn = makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-codex-resume"),
+          text: RESUME_PROMPT,
+        });
+        const linkOrigin = {
+          sessionId: "linked-native-parent",
+          label: "Laptop",
+          access: "auto" as const,
+        };
+        const linkedTurn = {
+          ...turn,
+          appThread: { ...turn.appThread, linkOrigin },
+        };
+        yield* harness.runtime.startTurn(linkedTurn);
         yield* awaitUntil(
           () =>
             harness.subagentUpdates().some((event) => event.subagent.result === "CODEX_FIRST_DONE"),
@@ -7938,6 +7946,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         assert.isFalse(yield* harness.hasPendingBackgroundWork);
         assert.lengthOf(harness.terminalEvents(), 1);
         assert.lengthOf(harness.continuationRequests, 0);
+        const nativeChild = harness.events.find((event) => event.type === "app_thread.created");
+        assert.isDefined(nativeChild);
+        if (nativeChild?.type === "app_thread.created") {
+          expect(nativeChild.appThread).toMatchObject({ linkOrigin });
+        }
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),

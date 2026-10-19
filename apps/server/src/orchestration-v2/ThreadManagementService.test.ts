@@ -60,15 +60,23 @@ it("stamps authoritative provenance on commands that create threads or messages"
     worktreePath: null,
   };
 
-  expect(
-    ThreadManagementService.withCreationProvenance(command, {
-      createdBy: "user",
-      creationSource: "web",
-    }),
-  ).toMatchObject({
+  const forged = {
+    ...command,
+    linkOrigin: {
+      sessionId: "forged",
+      label: "Another environment",
+      access: "full-access" as const,
+    },
+  };
+  const stamped = ThreadManagementService.withCreationProvenance(forged, {
     createdBy: "user",
     creationSource: "web",
   });
+  expect(stamped).toMatchObject({
+    createdBy: "user",
+    creationSource: "web",
+  });
+  expect(stamped).not.toHaveProperty("linkOrigin");
 });
 
 it("leaves commands that do not create durable authored content unchanged", () => {

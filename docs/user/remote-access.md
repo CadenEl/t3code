@@ -3,6 +3,38 @@
 Connect a phone, browser, or another desktop app to T3 Code running on a different
 machine. That machine must stay running and reachable while you work.
 
+## Let agents work in another environment
+
+On the destination, run `t3 pair` to get a pairing code. On the environment
+whose agents need access, run:
+
+```bash
+t3 environment link https://destination.example --pairing-code CODE --access auto
+t3 environment list
+t3 environment unlink ENVIRONMENT_ID
+```
+
+Both environments must be reachable and run a version that supports peer links.
+Access defaults to `approval-required`; other choices are `read-only`,
+`auto-accept-edits`, `auto`, and `full-access`. Forwarded calls also keep the calling
+agent's narrower permission limits. Agents can use `t3_environment_links` to find
+destinations and pass `environmentId` to tools that support working there. Omit it
+for local work.
+
+Below full access, linked agents can read local work but can change only threads
+started by the same pairing session, including descendants. They cannot change environment
+settings, existing projects or scheduled tasks, run project setup or settle
+scripts, or forward through another link. Raising a thread's permission mode does
+not remove those restrictions. Setup and settle scripts stay disabled for these
+threads and their forks even when you act on them. Creating or cloning a project still requires a
+currently full-access caller. Links paired with `full-access` are exempt from the
+own-work restrictions. Normal access and permission checks always apply.
+
+If an older saved link asks you to pair again, update both environments and repeat
+`link` with a fresh pairing code. A new pairing cannot change threads started by
+the previous pairing unless it has full access. Unlinking forgets the credential here; revoke the
+client in the destination's **Settings → Connections** to end its session there.
+
 ## T3 Connect
 
 T3 Connect makes an environment available to your other devices without setting

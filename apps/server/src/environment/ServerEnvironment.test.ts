@@ -218,8 +218,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(first.environmentId).toBe(second.environmentId);
       expect(first.orchestrationProtocolVersion).toBe(ORCHESTRATION_PROTOCOL_VERSION);
       expect(second.capabilities.repositoryIdentity).toBe(true);
-      // Enable only with origin persistence and fence enforcement in the final layer.
-      expect(second.capabilities).not.toHaveProperty("linkFence", true);
+      expect(second.capabilities).toMatchObject({ mcpModeLimitHeader: true, linkFence: true });
       expect(second.capabilities.connectionProbe).toBe(true);
       expect(second.capabilities.attachmentUploads).toBe(true);
       expect(second.capabilities.fileAttachments).toEqual({ maxUploadBytes: 50 * 1024 * 1024 });

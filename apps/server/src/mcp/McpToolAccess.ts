@@ -1,5 +1,6 @@
 import {
   type EnvironmentId,
+  type OrchestrationV2LinkOrigin,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
   type ProviderInteractionMode,
@@ -20,6 +21,7 @@ import {
   DispatchModeLimit,
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
+import { assertLinkThreadTarget, assertUnfencedCaller, callerLinkOrigin } from "./linkOrigin.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { resolveInteractionMode, resolveRuntimeMode } from "./OrchestratorMcpService.ts";
 import {
@@ -135,9 +137,20 @@ export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A,
     ),
   );
 
-export const writes = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+export const writes = <P, A, E, R>(
+  handle: (params: P) => Effect.Effect<A, E, R>,
+  options?: { readonly linkedCallers?: "allowed" },
+) =>
   declare(
-    (params: P) => orchestratingCaller.pipe(Effect.flatMap(() => handle(params))),
+    (params: P) =>
+      orchestratingCaller.pipe(
+        Effect.tap((caller) =>
+          options?.linkedCallers === "allowed"
+            ? Effect.void
+            : assertUnfencedCaller(caller, "change environment resources"),
+        ),
+        Effect.flatMap(() => handle(params)),
+      ),
     () => orchestratingCaller.pipe(Effect.asVoid),
   );
 
@@ -146,7 +159,12 @@ export const writes = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>
  * capability, as the capability toolkits do.
  */
 export const writesWithCapability = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
-  declare((params: P) => writingCaller.pipe(Effect.flatMap(() => handle(params))));
+  declare((params: P) =>
+    writingCaller.pipe(
+      Effect.tap((caller) => assertUnfencedCaller(caller, "change environment resources")),
+      Effect.flatMap(() => handle(params)),
+    ),
+  );
 
 export const writesThreads = <P, A, E, R>(
   threads: (params: P) => ReadonlyArray<ThreadId | undefined>,
@@ -156,13 +174,16 @@ export const writesThreads = <P, A, E, R>(
     (params: P) =>
       Effect.gen(function* () {
         const caller = yield* writingCaller;
-        for (const threadId of threads(params)) {
-          if (threadId === undefined || threadId === caller.scope.thread?.threadId) continue;
-          const target = yield* caller.threads
-            .getThreadShell(threadId)
-            .pipe(Effect.mapError(unavailable));
+        for (const requestedId of threads(params)) {
+          const threadId = requestedId ?? caller.caller?.id;
+          if (threadId === undefined) continue;
+          const target =
+            threadId === caller.caller?.id
+              ? caller.caller
+              : yield* caller.threads.getThreadShell(threadId).pipe(Effect.mapError(unavailable));
           if (target !== null && target.deletedAt === null) {
             yield* assertTargetWithinLimits(caller.limits, target);
+            yield* assertLinkThreadTarget(caller, target);
           }
         }
         // The target's user can raise its modes after the check above; the
@@ -195,6 +216,7 @@ const escalationDenied = (refusal: DispatchModeRefusal) =>
 export interface StartedModes {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
+  readonly linkOrigin: OrchestrationV2LinkOrigin | undefined;
 }
 
 export const startsThreads = <P, A, E, R>(
@@ -203,13 +225,17 @@ export const startsThreads = <P, A, E, R>(
     readonly interactionMode?: ProviderInteractionMode | undefined;
   },
   handle: (params: P, modes: StartedModes) => Effect.Effect<A, E, R>,
+  link: "stamped" | { readonly refused: string },
 ) =>
   declare(
     (params: P) =>
       Effect.gen(function* () {
-        const { limits } = yield* writingCaller;
+        const caller = yield* writingCaller;
+        const { limits } = caller;
+        if (link !== "stamped") yield* assertUnfencedCaller(caller, link.refused);
         const requested = modes(params);
         const started: StartedModes = {
+          linkOrigin: callerLinkOrigin(caller),
           runtimeMode: yield* resolveRuntimeMode(limits.runtimeMode, requested.runtimeMode),
           interactionMode: yield* resolveInteractionMode(
             limits.interactionMode,
@@ -239,13 +265,23 @@ export const writesEnvironment = <P, A, E, R>(
     params: P,
     check: Effect.Effect<Caller, OrchestratorMcpFailure, CheckServices>,
   ) => Effect.Effect<A, E, R>,
+  options?: { readonly linkedCallers?: "allowed" },
 ) => {
   const check = orchestratingCaller.pipe(
+    Effect.tap((caller) =>
+      options?.linkedCallers === "allowed"
+        ? Effect.void
+        : assertUnfencedCaller(caller, "change projects or environment settings"),
+    ),
     Effect.tap((caller) => assertFullAccess(caller, fullAccessRequired)),
   );
   return declare(
     (params: P) => check.pipe(Effect.flatMap(() => handle(params, check))),
-    () => check.pipe(Effect.asVoid),
+    () =>
+      orchestratingCaller.pipe(
+        Effect.tap((caller) => assertFullAccess(caller, fullAccessRequired)),
+        Effect.asVoid,
+      ),
   );
 };
 

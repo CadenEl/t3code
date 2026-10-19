@@ -7,7 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../config.ts";
 import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
-import { assert, it, vi } from "@effect/vitest";
+import { assert, expect, it, vi } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { McpSchema, McpServer } from "effect/ai";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
@@ -51,6 +51,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -2101,7 +2102,12 @@ it.effect("replays MCP launches durably within each caller's request namespace",
               environmentId: EnvironmentId.make("launch-environment"),
               requestNamespace: `client:${sessionId}`,
               thread: undefined,
-              client: { sessionId, label: sessionId, access: "auto" },
+              client: {
+                sessionId,
+                label: sessionId,
+                access: "auto",
+                linked: sessionId === "caller-a",
+              },
               issuedAt: 0,
               capabilities: new Set(["orchestration"] as const),
             }),
@@ -2130,6 +2136,46 @@ it.effect("replays MCP launches durably within each caller's request namespace",
         assert.equal(projection.thread.interactionMode, "default");
         assert.deepEqual(projection.thread.modelSelection, modelSelection);
       }
+      const origin = { sessionId: "caller-a", label: "caller-a", access: "auto" };
+      expect
+        .soft((yield* threads.getThreadProjection(first.threadId)).thread)
+        .toMatchObject({ linkOrigin: origin });
+      expect
+        .soft(yield* threads.getThreadShell(first.threadId))
+        .toMatchObject({ linkOrigin: origin });
+      expect
+        .soft(
+          (yield* threads.getShellSnapshot()).threads.find(
+            (thread) => thread.id === first.threadId,
+          ),
+        )
+        .toMatchObject({ linkOrigin: origin });
+      expect((yield* threads.getThreadProjection(other.threadId)).thread).not.toHaveProperty(
+        "linkOrigin",
+      );
+      const created = Option.getOrThrow(
+        yield* threads
+          .streamStoredEventsFrom({
+            threadId: first.threadId,
+            afterSequence: 0,
+          })
+          .pipe(
+            Stream.filter((stored) => stored.event.type === "thread.created"),
+            Stream.runHead,
+          ),
+      );
+      expect.soft(created.event.payload).toMatchObject({ linkOrigin: origin });
+      yield* Effect.gen(function* () {
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        yield* projections.apply(created.event);
+        expect
+          .soft(yield* projections.getThreadShell(first.threadId))
+          .toMatchObject({ linkOrigin: origin });
+      }).pipe(
+        Effect.provide(
+          ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory), Layer.fresh),
+        ),
+      );
     }).pipe(Effect.provide(layerToolkit));
   }),
 );

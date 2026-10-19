@@ -84,6 +84,9 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as Repositories from "../sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as AttachmentUpload from "../assets/AttachmentUpload.ts";
+import { AttachmentToolkit } from "../mcp/toolkits/attachment/tools.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -140,6 +143,7 @@ const registration = Layer.mergeAll(
   McpHttpServer.layerOrchestratorToolkit,
   McpHttpServer.layerThreadToolkit,
   McpHttpServer.layerEnvironmentToolkit,
+  McpHttpServer.layerAttachmentToolkit,
   McpHttpServer.toolkitRegistration(ProjectToolkit, ProjectHandlers.layer),
 );
 
@@ -246,7 +250,6 @@ const makeEnvironment = Effect.fnUntraced(function* (id: EnvironmentId) {
     Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
       resolveLink: () => undefined,
     }),
-    Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
     Layer.mock(SecretRequests.SecretRequests)({}),
     Layer.mock(ThreadSearch.ThreadSearch)({}),
   );
@@ -261,11 +264,20 @@ const makeEnvironment = Effect.fnUntraced(function* (id: EnvironmentId) {
     ThreadCommandExecutor.layer,
   );
   const launch = ThreadLaunch.layer.pipe(Layer.provide(base));
+  const schedules = ScheduledTasks.layer.pipe(
+    Layer.provide(Layer.mergeAll(launch, base, Scheduler.layer)),
+    Layer.provide(database),
+  );
   const business = Layer.mergeAll(
-    OrchestratorMcpService.layer.pipe(Layer.provide(launch), Layer.provide(base)),
+    OrchestratorMcpService.layer.pipe(
+      Layer.provide(schedules),
+      Layer.provide(launch),
+      Layer.provide(base),
+    ),
     ThreadMetadataMcpService.layer.pipe(Layer.provide(threads)),
     Repositories.layer.pipe(Layer.provide(external)),
     launch,
+    schedules,
     base,
     McpOAuth.layerMcpClientAuthenticator.pipe(Layer.provideMerge(EnvironmentAuth.layer)),
   ).pipe(
@@ -496,6 +508,393 @@ const paired = Effect.gen(function* () {
   return { source, destination, http, links, pair, call, invoke };
 });
 
+it.effect("fences linked work by its immutable session while preserving local exceptions", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const f = yield* paired;
+      const fs = yield* FileSystem.FileSystem;
+      const userThread = yield* f.source.seed("user-auto", "auto");
+      const broadThread = yield* f.source.seed("user-full");
+      const remoteThread = yield* f.destination.seed("third-hop");
+      const authenticate = Effect.fnUntraced(function* (
+        label: string,
+        access: "auto" | "full-access",
+      ) {
+        const issued = yield* f.source.auth.issueMcpClientSession({
+          label,
+          access,
+          linked: true,
+          client: { deviceType: "bot" },
+        });
+        const authenticated = yield* Context.get(
+          f.source.context,
+          McpHttpServer.McpClientAuthenticator,
+        ).authenticate(
+          HttpServerRequest.fromWeb(
+            new Request("http://localhost/mcp", {
+              headers: { authorization: `Bearer ${issued.token}` },
+            }),
+          ),
+        );
+        if (authenticated === undefined)
+          return yield* Effect.die("Signed linked session was rejected");
+        return authenticated;
+      });
+      const auto = yield* authenticate("Laptop", "auto");
+      const other = yield* authenticate("Other laptop", "auto");
+      const full = yield* authenticate("Trusted desktop", "full-access");
+      const launch = (caller: McpInvocationContext.McpInvocationScope, title: string) =>
+        f.call(
+          ProjectToolkit.tools.t3_thread_launch,
+          {
+            projectId: f.source.project.id,
+            title,
+            message: "Start work",
+            clientRequestId: title,
+          },
+          caller,
+        );
+      const own = yield* launch(auto, "own");
+      const sibling = yield* launch(auto, "same-session-sibling");
+      const foreign = yield* launch(other, "foreign");
+      const trusted = yield* launch(full, "trusted");
+      const asThread = (threadId: ThreadId): McpInvocationContext.McpInvocationScope => ({
+        ...scope(),
+        client: undefined,
+        requestNamespace: `provider:${threadId}`,
+        thread: {
+          threadId,
+          providerInstanceId: modelSelection.instanceId,
+          providerSessionId: `live:${threadId}`,
+        },
+      });
+      const ownAgent = asThread(own.threadId);
+      const trustedAgent = asThread(trusted.threadId);
+      const denied = { isError: true, structuredContent: { code: "capability_denied" } };
+      const send = (threadId: ThreadId, key: string) => ({
+        threadId,
+        message: key,
+        clientRequestId: key,
+      });
+      yield* f.call(
+        OrchestratorToolkit.tools.t3_thread_send,
+        send(sibling.threadId, "same-session"),
+        ownAgent,
+      );
+      const userBefore = yield* f.source.threads.getThreadProjection(userThread);
+      const foreignBefore = yield* f.source.threads.getThreadProjection(foreign.threadId);
+      const ownOrigin = { sessionId: auto.client!.sessionId, label: "Laptop", access: "auto" };
+      expect
+        .soft((yield* f.source.threads.getThreadProjection(own.threadId)).thread)
+        .toMatchObject({ linkOrigin: ownOrigin });
+      // Both omitted and explicit own environment IDs use the same fence.
+      for (const caller of [auto, ownAgent]) {
+        yield* f.call(
+          OrchestratorToolkit.tools.t3_thread_read,
+          { environmentId: sourceId, threadId: userThread },
+          caller,
+        );
+        yield* f.call(
+          OrchestratorToolkit.tools.t3_thread_send,
+          send(own.threadId, `${caller.requestNamespace}:own`),
+          caller,
+        );
+        for (const threadId of [userThread, foreign.threadId]) {
+          expect
+            .soft(
+              yield* f.invoke(
+                OrchestratorToolkit.tools.t3_thread_send,
+                {
+                  ...send(threadId, `${caller.requestNamespace}:forbidden:${threadId}`),
+                  environmentId: sourceId,
+                },
+                caller,
+              ),
+            )
+            .toMatchObject(denied);
+        }
+      }
+      const queued = yield* f.call(
+        OrchestratorToolkit.tools.t3_thread_send,
+        {
+          ...send(own.threadId, "queue"),
+          mode: "queue",
+        },
+        ownAgent,
+      );
+      yield* f.call(
+        ThreadToolkit.tools.t3_queue_edit,
+        { threadId: own.threadId, queuedRunId: queued.runId, text: "edited" },
+        ownAgent,
+      );
+      expect(
+        (yield* f.source.threads.getThreadProjection(own.threadId)).messages.find(
+          (message) => message.id === queued.messageId,
+        )?.text,
+      ).toBe("edited");
+      expect
+        .soft(
+          yield* f.invoke(
+            OrchestratorToolkit.tools.t3_thread_update,
+            {
+              threadId: userThread,
+              action: "rename",
+              title: "Forbidden rename",
+            },
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      expect.soft(yield* f.source.threads.getThreadProjection(userThread)).toEqual(userBefore);
+      expect
+        .soft(yield* f.source.threads.getThreadProjection(foreign.threadId))
+        .toEqual(foreignBefore);
+
+      yield* f.source.threads.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("upgrade-linked"),
+        threadId: own.threadId,
+        runtimeMode: "full-access",
+      });
+      expect
+        .soft(
+          yield* f.invoke(
+            OrchestratorToolkit.tools.t3_thread_send,
+            send(userThread, "upgraded-still-fenced"),
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      const projectBefore = yield* f.source.projects.getById(f.source.project.id);
+      expect
+        .soft(
+          yield* f.invoke(
+            ProjectToolkit.tools.t3_project_update,
+            { projectId: f.source.project.id, title: "Forbidden project edit" },
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      expect.soft(yield* f.source.projects.getById(f.source.project.id)).toEqual(projectBefore);
+      const schedule = {
+        projectId: f.source.project.id,
+        prompt: "Later",
+        schedule: { type: "interval" as const, everyMs: 3600000 },
+        enabled: false,
+      };
+      const scheduled = yield* f.call(OrchestratorToolkit.tools.schedule_task, schedule);
+      const schedules = Context.get(f.source.context, ScheduledTasks.ScheduledTaskService);
+      const schedulesBefore = yield* schedules.list();
+      expect
+        .soft(
+          yield* f.invoke(
+            OrchestratorToolkit.tools.schedule_task,
+            { ...schedule, clientRequestId: "forbidden-schedule" },
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      expect
+        .soft(
+          yield* f.invoke(
+            OrchestratorToolkit.tools.delete_scheduled_task,
+            { scheduledTaskId: scheduled.scheduledTaskId },
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      expect.soft(yield* schedules.list()).toEqual(schedulesBefore);
+
+      const cloneArgs = {
+        remoteUrl: "https://example.com/team/repo.git",
+        destinationPath: `${f.source.root}/linked-clone`,
+      };
+      expect(yield* f.invoke(ProjectToolkit.tools.t3_project_clone, cloneArgs, auto)).toMatchObject(
+        denied,
+      );
+      expect(
+        yield* f.invoke(
+          ProjectToolkit.tools.t3_project_create,
+          { title: "No", workspaceRoot: `${f.source.root}/no`, createWorkspaceRootIfMissing: true },
+          auto,
+        ),
+      ).toMatchObject(denied);
+      const cloned = yield* f.call(ProjectToolkit.tools.t3_project_clone, cloneArgs, ownAgent);
+      const registered = yield* f.call(
+        ProjectToolkit.tools.t3_project_create,
+        { title: "Allowed new project", workspaceRoot: cloned.cwd },
+        ownAgent,
+      );
+      expect(yield* fs.readFileString(`${cloned.cwd}/cloned.txt`)).toBe("controlled git clone");
+      expect(Option.getOrThrow(yield* f.source.projects.getById(registered.id)).workspaceRoot).toBe(
+        cloned.cwd,
+      );
+
+      const upload = {
+        type: "file" as const,
+        name: "note.txt",
+        mimeType: "text/plain",
+        sizeBytes: 4,
+      };
+      const stage = Effect.fnUntraced(function* () {
+        const prepared = yield* f.call(
+          AttachmentToolkit.tools.t3_attachment_prepare_upload,
+          { upload },
+          ownAgent,
+        );
+        const claims = yield* AttachmentUpload.validateAttachmentUploadToken(
+          prepared.relativeUrl.split("/").at(-1)!,
+        ).pipe(Effect.provide(f.source.context));
+        if (claims === null) return yield* Effect.die("Upload token did not validate");
+        expect(
+          yield* AttachmentUpload.storeAttachmentUpload(
+            claims,
+            new Uint8Array([116, 101, 115, 116]),
+          ).pipe(Effect.provide(f.source.context)),
+        ).toEqual({ ok: true });
+        return { ...upload, id: ChatAttachmentId.make(prepared.attachmentId) };
+      });
+      const attachment = yield* stage();
+      const config = Context.get(f.source.context, ServerConfig.ServerConfig);
+      const pendingPath = resolveAttachmentPath({
+        attachmentsDir: config.attachmentsDir,
+        attachment,
+      })!;
+      expect(
+        yield* f.invoke(
+          AttachmentToolkit.tools.t3_attachment_discard,
+          { attachmentId: attachment.id },
+          other,
+        ),
+      ).toMatchObject({ isError: true, structuredContent: { code: "invalid_request" } });
+      expect
+        .soft(
+          yield* f.invoke(
+            AttachmentToolkit.tools.t3_thread_send_attachments,
+            { threadId: userThread, attachments: [attachment] },
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      expect.soft(yield* fs.exists(pendingPath)).toBe(true);
+      // A distinct pending upload keeps the successful claim independent of the refused send.
+      const owned = yield* stage();
+      const sent = yield* f.call(
+        AttachmentToolkit.tools.t3_thread_send_attachments,
+        { threadId: own.threadId, attachments: [owned] },
+        ownAgent,
+      );
+      const stored = (yield* f.source.threads.getThreadProjection(own.threadId)).messages.find(
+        (message) => message.id === sent.messageId,
+      )!.attachments[0]!;
+      expect(
+        yield* fs.readFileString(
+          resolveAttachmentPath({ attachmentsDir: config.attachmentsDir, attachment: stored })!,
+        ),
+      ).toBe("test");
+      expect(
+        yield* f.invoke(
+          AttachmentToolkit.tools.t3_thread_send_attachments,
+          { threadId: foreign.threadId, attachments: [stored] },
+          other,
+        ),
+      ).toMatchObject({ isError: true, structuredContent: { code: "invalid_request" } });
+      yield* f.call(
+        AttachmentToolkit.tools.t3_attachment_discard,
+        { attachmentId: attachment.id },
+        ownAgent,
+      );
+      expect(yield* fs.exists(pendingPath)).toBe(false);
+
+      for (const caller of [auto, ownAgent]) {
+        yield* Ref.set(f.http.requests, []);
+        yield* Ref.set(f.http.bearers, 0);
+        expect
+          .soft(
+            yield* f.invoke(
+              OrchestratorToolkit.tools.t3_thread_read,
+              { environmentId: destinationId, threadId: remoteThread },
+              caller,
+            ),
+          )
+          .toMatchObject(denied);
+        expect.soft(yield* Ref.get(f.http.requests)).toEqual([]);
+        expect.soft(yield* Ref.get(f.http.bearers)).toBe(0);
+      }
+      // Old persisted origins have no access member and remain fenced in a full-access thread.
+      yield* f.source.sql`UPDATE orchestration_v2_projection_threads
+      SET payload_json = json_remove(payload_json, '$.linkOrigin.access') WHERE thread_id = ${own.threadId}`;
+      expect
+        .soft(
+          yield* f.invoke(
+            OrchestratorToolkit.tools.t3_thread_send,
+            send(userThread, "legacy-still-fenced"),
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      yield* Ref.set(f.http.bearers, 0);
+      expect
+        .soft(
+          yield* f.invoke(
+            OrchestratorToolkit.tools.t3_thread_read,
+            { environmentId: destinationId, threadId: remoteThread },
+            ownAgent,
+          ),
+        )
+        .toMatchObject(denied);
+      expect.soft(yield* Ref.get(f.http.bearers)).toBe(0);
+      for (const caller of [full, trustedAgent]) {
+        yield* f.call(
+          OrchestratorToolkit.tools.t3_thread_send,
+          send(userThread, `${caller.requestNamespace}:exempt`),
+          caller,
+        );
+        yield* f.call(
+          OrchestratorToolkit.tools.t3_thread_read,
+          { environmentId: destinationId, threadId: remoteThread },
+          caller,
+        );
+      }
+      yield* f.source.threads.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("narrow-trusted"),
+        threadId: trusted.threadId,
+        runtimeMode: "auto",
+      });
+      expect(
+        yield* f.invoke(
+          OrchestratorToolkit.tools.t3_thread_send,
+          send(broadThread, "trusted-mode-ceiling"),
+          trustedAgent,
+        ),
+      ).toMatchObject({
+        isError: true,
+        structuredContent: { code: "runtime_mode_escalation_denied" },
+      });
+      expect(
+        yield* f.invoke(
+          OrchestratorToolkit.tools.t3_thread_send,
+          { ...send(remoteThread, "trusted-downstream-ceiling"), environmentId: destinationId },
+          trustedAgent,
+        ),
+      ).toMatchObject({
+        isError: true,
+        structuredContent: { code: "runtime_mode_escalation_denied" },
+      });
+      expect
+        .soft((yield* f.source.threads.getThreadProjection(trusted.threadId)).thread)
+        .toMatchObject({
+          linkOrigin: {
+            sessionId: full.client!.sessionId,
+            label: "Trusted desktop",
+            access: "full-access",
+          },
+        });
+    }),
+  ).pipe(Effect.provide(Layer.mergeAll(NodeHttpServer.layerTest, NodeServices.layer))),
+);
+
 it.effect(
   "routes registered tools over paired HTTP with durable caller namespaces and destination effects",
   () =>
@@ -618,6 +1017,7 @@ it.effect(
           scope("B", "auto"),
         );
         expect(otherLaunch.threadId).not.toBe(launched.threadId);
+        const signedSession = (yield* f.destination.auth.listSessions())[0]!;
         for (const launch of [launched, otherLaunch]) {
           const saved = yield* f.destination.threads.getThreadProjection(launch.threadId);
           expect(saved.messages).toHaveLength(1);
@@ -627,6 +1027,13 @@ it.effect(
             modelSelection,
             runtimeMode: "auto",
             interactionMode: "default",
+          });
+          expect.soft(saved.thread).toMatchObject({
+            linkOrigin: {
+              sessionId: signedSession.sessionId,
+              label: "T3 Code · source",
+              access: "full-access",
+            },
           });
         }
         expect(yield* f.source.threads.getThreadProjection(local)).toEqual(before);
@@ -786,6 +1193,9 @@ it.effect(
         expect(narrowSaved.thread).toMatchObject({
           runtimeMode: "auto",
           interactionMode: "default",
+        });
+        expect.soft(narrowSaved.thread).toMatchObject({
+          linkOrigin: { label: "T3 Code · source", access: "auto" },
         });
 
         const unicodeThreads: Array<ThreadId> = [];

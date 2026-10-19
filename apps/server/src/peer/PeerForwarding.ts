@@ -16,6 +16,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Tool from "effect/ai/Tool";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { assertUnfencedCaller } from "../mcp/linkOrigin.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { assertLiveCaller, readCaller, unavailable } from "../mcp/threadAccess.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -46,7 +47,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const environment = yield* ServerEnvironment.ServerEnvironment;
 
-  const callerLimits = (scope: Scope) =>
+  const callerContext = (scope: Scope) =>
     Effect.gen(function* () {
       const descriptor = yield* environment.getDescriptor;
       if (scope.environmentId !== descriptor.environmentId)
@@ -56,7 +57,7 @@ const make = Effect.gen(function* () {
         });
       const caller = yield* readCaller();
       yield* assertLiveCaller(caller);
-      return caller.limits;
+      return caller;
     }).pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
       Effect.provideService(ThreadManagement.ThreadManagementService, threads),
@@ -71,7 +72,10 @@ const make = Effect.gen(function* () {
     params: unknown,
   ) =>
     Effect.gen(function* () {
-      const limits = yield* callerLimits(scope);
+      const caller = yield* callerContext(scope);
+      // A third environment would see this server's credential, losing the original fence.
+      yield* assertUnfencedCaller(caller, "use this environment's links");
+      const { limits } = caller;
       const encoded = yield* Schema.encodeUnknownEffect(parameters as Schema.Encoder<unknown>)(
         params,
       ).pipe(Effect.mapError(unavailable));
@@ -161,7 +165,7 @@ const make = Effect.gen(function* () {
 
   const listLinks: PeerForwarding["Service"]["links"] = (scope) =>
     Effect.gen(function* () {
-      yield* callerLimits(scope);
+      yield* callerContext(scope);
       const listed = yield* links.list.pipe(Effect.mapError(unavailable));
       return {
         environmentId: scope.environmentId,

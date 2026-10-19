@@ -4048,11 +4048,17 @@ describe("orchestrator MCP toolkit", () => {
         yield* Effect.gen(function* () {
           const orchestrator = yield* Orchestrator.OrchestratorV2;
           const server = yield* McpServer.McpServer;
-          const parentCreate = yield* orchestrator.dispatch({
+          const linkOrigin = {
+            sessionId: "linked-parent",
+            label: "Laptop",
+            access: "auto" as const,
+          };
+          const parentCreateCommand = {
             type: "thread.create",
             createdBy: "user",
             creationSource: "web",
             commandId: CommandId.make("command:mcp-replay-parent:create"),
+            linkOrigin,
             threadId: parentThreadId,
             projectId,
             title: "MCP replay parent",
@@ -4061,7 +4067,8 @@ describe("orchestrator MCP toolkit", () => {
             interactionMode: "default",
             branch: null,
             worktreePath: cwd,
-          });
+          } as const;
+          const parentCreate = yield* orchestrator.dispatch(parentCreateCommand);
           yield* orchestrator.dispatch({
             type: "message.dispatch",
             createdBy: "user",
@@ -4116,6 +4123,15 @@ describe("orchestrator MCP toolkit", () => {
 
           const delegationStartSequence =
             yield* orchestrator.getThreadEventSequence(parentThreadId);
+          const createdCall = yield* invoke("create_threads", {
+            threads: [{ title: "Inherited linked conversation" }],
+            clientRequestId: "linked-create",
+          });
+          expect(createdCall.isError).not.toBe(true);
+          const created = yield* decodeCreateThreadsResult(createdCall.structuredContent);
+          expect
+            .soft((yield* orchestrator.getThreadProjection(created.threads[0]!.threadId)).thread)
+            .toMatchObject({ linkOrigin });
           const delegatedCall = yield* invoke("delegate_task", {
             task: delegatedPrompt,
             target: {
@@ -4173,6 +4189,21 @@ describe("orchestrator MCP toolkit", () => {
           const delegatedChild = yield* orchestrator.getThreadProjection(delegated.childThreadId);
           expect(delegatedChild.thread.lineage.relationshipToParent).toBe("subagent");
           expect(isProviderNativeSubagentThread(delegatedChild.thread)).toBe(false);
+          expect.soft(delegatedChild.thread).toMatchObject({ linkOrigin });
+          const forkThreadId = ThreadId.make("thread:linked-replay-fork");
+          yield* orchestrator.dispatch({
+            type: "thread.fork",
+            commandId: CommandId.make("command:linked-replay-fork"),
+            sourceThreadId: delegated.childThreadId,
+            targetThreadId: forkThreadId,
+            sourcePoint: { type: "latest_stable" },
+            title: "Linked fork",
+            createdBy: "agent",
+            creationSource: "mcp",
+          });
+          expect
+            .soft((yield* orchestrator.getThreadProjection(forkThreadId)).thread)
+            .toMatchObject({ linkOrigin });
           const followupStartSequence = yield* orchestrator.getThreadEventSequence(
             delegated.childThreadId,
           );

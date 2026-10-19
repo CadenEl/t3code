@@ -1120,6 +1120,7 @@ it.effect("admits provider and OAuth client credentials and points only clients 
               Effect.sync(() => {
                 started.push(`${modes.runtimeMode}/${modes.interactionMode}`);
               }),
+            "stamped",
           ),
           probe: McpToolAccess.reads(() =>
             McpInvocationContext.McpInvocationContext.pipe(

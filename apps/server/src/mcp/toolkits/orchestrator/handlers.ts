@@ -65,6 +65,7 @@ const handlers = {
         const service = yield* OrchestratorMcpService.OrchestratorMcpService;
         return yield* service.scheduleTask(scope, input);
       }),
+    { refused: "schedule tasks in this environment" },
   ),
   list_scheduled_tasks: McpToolAccess.reads((input) =>
     Effect.gen(function* () {

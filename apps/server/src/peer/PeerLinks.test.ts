@@ -38,6 +38,8 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerHttp from "../http.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { runMigrations } from "../persistence/Migrations.ts";
 import * as PeerLinks from "./PeerLinks.ts";
 
 class PeerTestApi extends HttpApi.make("environment")
@@ -136,35 +138,42 @@ const servePeer = Effect.gen(function* () {
   };
 });
 
-const makeLaptop = Effect.gen(function* () {
-  const context = yield* Layer.mergeAll(
-    Sqlite.layerMemory,
-    ServerSecretStore.layer,
-    FetchHttpClient.layer,
-    environmentLayer(Effect.succeed(laptop)),
-  ).pipe(
-    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-peer-link-local-" })),
-    Layer.provideMerge(NodeServices.layer),
-    Layer.fresh,
-    Layer.build,
-  );
-  const secrets = Context.get(context, ServerSecretStore.ServerSecretStore);
-  const reopen = (store = secrets) =>
-    PeerLinks.layer.pipe(
-      Layer.provide(
-        Layer.succeedContext(Context.add(context, ServerSecretStore.ServerSecretStore, store)),
-      ),
+const makeLaptop = (throughMigration?: number) =>
+  Effect.gen(function* () {
+    const database =
+      throughMigration === undefined
+        ? Sqlite.layerMemory
+        : Layer.effectDiscard(runMigrations({ toMigrationInclusive: throughMigration })).pipe(
+            Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+          );
+    const context = yield* Layer.mergeAll(
+      database,
+      ServerSecretStore.layer,
+      FetchHttpClient.layer,
+      environmentLayer(Effect.succeed(laptop)),
+    ).pipe(
+      Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-peer-link-local-" })),
+      Layer.provideMerge(NodeServices.layer),
       Layer.fresh,
       Layer.build,
-      Effect.map((services) => Context.get(services, PeerLinks.PeerLinks)),
     );
-  return {
-    links: yield* reopen(),
-    reopen,
-    sql: Context.get(context, SqlClient.SqlClient),
-    secrets,
-  };
-});
+    const secrets = Context.get(context, ServerSecretStore.ServerSecretStore);
+    const reopen = (store = secrets) =>
+      PeerLinks.layer.pipe(
+        Layer.provide(
+          Layer.succeedContext(Context.add(context, ServerSecretStore.ServerSecretStore, store)),
+        ),
+        Layer.fresh,
+        Layer.build,
+        Effect.map((services) => Context.get(services, PeerLinks.PeerLinks)),
+      );
+    return {
+      links: yield* reopen(),
+      reopen,
+      sql: Context.get(context, SqlClient.SqlClient),
+      secrets,
+    };
+  });
 
 it.effect(
   "pairs through OAuth, persists a redacted link, and forgets its credential on unlink",
@@ -174,7 +183,7 @@ it.effect(
         const peer = yield* servePeer;
         const alternateServer = yield* Layer.build(Layer.fresh(NodeHttpServer.layerTest));
         const alternate = yield* servePeer.pipe(Effect.provide(alternateServer));
-        const local = yield* makeLaptop;
+        const local = yield* makeLaptop();
         expect(
           yield* local.links
             .link({ url: peer.url, pairingCode: "wrong", access: "auto" })
@@ -310,7 +319,7 @@ it.effect("refuses unsafe peers and repairs a revoked link", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const peer = yield* servePeer;
-      const local = yield* makeLaptop;
+      const local = yield* makeLaptop();
       const receiverContext = yield* Layer.build(Layer.fresh(NodeHttpServer.layerTest));
       const receiver = Context.get(receiverContext, HttpServer.HttpServer);
       const received = yield* Ref.make<
@@ -462,6 +471,69 @@ it.effect("refuses unsafe peers and repairs a revoked link", () =>
           ),
         },
       });
+
+      const legacy = yield* makeLaptop(65);
+      const old = yield* peer.auth.issueMcpClientSession({
+        label: "Legacy laptop",
+        access: "auto",
+        client: { deviceType: "bot" },
+      });
+      yield* legacy.secrets.set("legacy-peer", new TextEncoder().encode(old.token));
+      yield* legacy.sql`INSERT INTO peer_environment_links
+        (environment_id, secret_name, label, urls_json, access, linked_at, expires_at)
+        VALUES (${box.environmentId}, 'legacy-peer', 'Box', ${JSON.stringify([peer.url])},
+          'auto', '2026-01-01T00:00:00.000Z', '2099-01-01T00:00:00.000Z')`;
+      const migrated = yield* runMigrations().pipe(
+        Effect.provideService(SqlClient.SqlClient, legacy.sql),
+      );
+      expect.soft(migrated).toEqual([[66, "PeerLinkFence"]]);
+      expect
+        .soft(
+          yield* legacy.sql`SELECT migration_id, name FROM effect_sql_migrations
+        WHERE migration_id >= 64 ORDER BY migration_id`,
+        )
+        .toEqual([
+          { migration_id: 64, name: "CanonicalizeThreadPullRequestLinks" },
+          { migration_id: 65, name: "PeerLinks" },
+          { migration_id: 66, name: "PeerLinkFence" },
+        ]);
+      expect
+        .soft((yield* legacy.sql`SELECT * FROM peer_environment_links`)[0])
+        .toMatchObject({ fenced: 0 });
+      let secretReads = 0;
+      const guarded = yield* legacy.reopen({
+        ...legacy.secrets,
+        get: (name) =>
+          Effect.sync(() => {
+            secretReads += 1;
+          }).pipe(Effect.andThen(legacy.secrets.get(name))),
+      });
+      yield* Ref.set(peer.requests, []);
+      const refused = yield* guarded.resolve(box.environmentId).pipe(Effect.result);
+      expect.soft(refused).toMatchObject({
+        _tag: "Failure",
+        failure: { reason: "incompatible", message: expect.stringMatching(/link.*again/i) },
+      });
+      expect.soft(secretReads).toBe(0);
+      expect
+        .soft(
+          (yield* Ref.get(peer.requests)).every((request) => request.authorization === undefined),
+        )
+        .toBe(true);
+      yield* guarded.link({
+        url: peer.url,
+        access: "auto",
+        pairingCode: (yield* peer.auth.issuePairingCredential()).credential,
+      });
+      const repaired = yield* guarded.resolve(box.environmentId);
+      expect((yield* peer.authenticate(repaired.token))?.client).toMatchObject({
+        linked: true,
+        access: "auto",
+      });
+      expect
+        .soft((yield* legacy.sql`SELECT * FROM peer_environment_links`)[0])
+        .toMatchObject({ fenced: 1 });
+      expect(yield* legacy.secrets.get("legacy-peer")).toEqual(Option.none());
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
@@ -470,7 +542,7 @@ it.effect("keeps a renewed link usable when removing its old credential fails", 
   Effect.scoped(
     Effect.gen(function* () {
       const peer = yield* servePeer;
-      const local = yield* makeLaptop;
+      const local = yield* makeLaptop();
       yield* local.links.link({
         url: peer.url,
         pairingCode: (yield* peer.auth.issuePairingCredential()).credential,

@@ -70,6 +70,7 @@ interface PeerLinkRow {
   readonly expires_at: string;
   readonly last_reached_at: string | null;
   readonly last_error: string | null;
+  readonly fenced: number;
 }
 
 const decodeUrls = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)));
@@ -341,14 +342,15 @@ const make = Effect.gen(function* () {
               yield* sql`
                 INSERT INTO peer_environment_links (
                   environment_id, secret_name, label, urls_json, access, linked_at, expires_at,
-                  last_reached_at, last_error
+                  last_reached_at, last_error, fenced
                 ) VALUES (
                   ${linked.environmentId}, ${secretName}, ${linked.label}, ${urlsJson}, ${linked.access},
                   ${DateTime.formatIso(linked.linkedAt)}, ${DateTime.formatIso(linked.expiresAt)},
-                  ${DateTime.formatIso(now)}, NULL
+                  ${DateTime.formatIso(now)}, NULL, 1
                 )
                 ON CONFLICT (environment_id) DO UPDATE SET
                   secret_name = excluded.secret_name,
+                  fenced = excluded.fenced,
                   label = excluded.label,
                   urls_json = excluded.urls_json,
                   access = excluded.access,
@@ -444,6 +446,13 @@ const make = Effect.gen(function* () {
       return yield* new PeerLinkError({
         reason: "expired",
         message: `The link to ${link.label} expired. Link it again with a new pairing code from ${link.label}.`,
+      });
+    }
+    // Old credentials lack the signed peer marker even after the peer upgrades.
+    if (row.value.fenced !== 1) {
+      return yield* new PeerLinkError({
+        reason: "incompatible",
+        message: `The link to ${link.label} was made by an older T3 Code. Link it again with a new pairing code from ${link.label}.`,
       });
     }
     // Public IDs guard against stale addresses of honest peers. Transport trust
