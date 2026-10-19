@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -15,6 +16,7 @@ import {
   resolveDefaultProviderModelSelection,
   resolveProviderCatalogAvailability,
   resolveSelectableProviderInstance,
+  shouldShowInstanceBadge,
 } from "./providerInstances";
 
 function provider(input: {
@@ -340,6 +342,33 @@ describe("deriveProviderEntriesByEnvironment", () => {
     expect(byEnvironment.get("local")?.get("claude")?.accentColor).toBe("#112233");
     expect(byEnvironment.get("remote")?.get("claude")?.displayName).toBe("Claude Remote");
     expect(byEnvironment.get("remote")?.get("claude")?.accentColor).toBe("#445566");
+  });
+
+  it("keeps an instance a project turns on as a sibling for the instance badge", () => {
+    const codex = ProviderDriverKind.make("codex");
+    const byEnvironment = deriveProviderEntriesByEnvironment([
+      [
+        "local",
+        [
+          provider({ provider: codex, instanceId: "codex" }),
+          provider({ provider: codex, instanceId: "codex_work" }),
+        ],
+        {
+          providerInstances: {
+            [ProviderInstanceId.make("codex_work")]: { driver: codex, enabled: false },
+          },
+          projectSettingsOverrides: {
+            [ProjectId.make("project-work")]: {
+              providerInstances: { [ProviderInstanceId.make("codex_work")]: { enabled: true } },
+            },
+          },
+        },
+      ],
+    ]);
+    const entries = byEnvironment.get("local");
+    const personal = entries?.get("codex");
+
+    expect(personal && shouldShowInstanceBadge(personal, entries?.values() ?? [])).toBe(true);
   });
 
   it("never falls back to another environment's instances", () => {
