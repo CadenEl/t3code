@@ -840,8 +840,6 @@ describe("assistant citation cursor offsets", () => {
   });
 });
 
-describe("replaceTextRange trailing space consumption", () => {});
-
 describe("isCollapsedCursorAdjacentToInlineToken", () => {
   it("returns false when no mention exists", () => {
     expect(isCollapsedCursorAdjacentToInlineToken("plain text", 6, "left")).toBe(false);
