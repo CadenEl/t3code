@@ -471,6 +471,7 @@ export function NewTaskDraftScreen(props: {
   const composerMenu = useComposerCommandMenu({
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
+    projectId: selectedProject?.id ?? null,
     environmentId: selectedProject?.environmentId ?? null,
     threadShells: useThreadShells(),
     pullRequestProjectId: selectedEnvironmentServerConfig?.environment.capabilities.pullRequests

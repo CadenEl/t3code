@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Dialog from "../../components/ui/Dialog";
 import type {
   EnvironmentId,
@@ -36,10 +38,8 @@ import {
   scoreQueryMatch,
 } from "@t3tools/shared/searchRanking";
 import {
-  dedupeProviderSkillsByName,
   getProviderSkillsForSlashMenu,
   getProviderSlashCommandsForSlashMenu,
-  isProviderSkillUserInvocable,
   hasCompleteProviderWorkspaceSnapshot,
   hasCurrentProviderWorkspaceSnapshot,
   resolveProviderSkillsForCwd,
@@ -174,6 +174,7 @@ export function useComposerCommandMenu({
   threadShells = EMPTY_THREAD_SHELLS,
   currentThreadId = null,
   projectCwd,
+  projectId = null,
   pullRequestProjectId = null,
   pullRequestRepository = null,
   threadPullRequests,
@@ -192,6 +193,7 @@ export function useComposerCommandMenu({
   readonly threadShells?: ReadonlyArray<EnvironmentThreadShell>;
   readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
+  readonly projectId?: ProjectId | null;
   readonly pullRequestProjectId?: ProjectId | null;
   readonly pullRequestRepository?: string | null;
   readonly threadPullRequests?: ReadonlyArray<ThreadPullRequestLink>;
@@ -204,6 +206,10 @@ export function useComposerCommandMenu({
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
   readonly onUsageLimits?: () => void;
 }) {
+  const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  const disabledSkills = config
+    ? resolveProjectSettings(config.settings, projectId).settings.disabledSkills
+    : [];
   const [selection, setSelection] = useState(() => composerSelectionAtEnd(draftMessage));
   const previousOwnerKeyRef = useRef(ownerKey);
   const onSelectionChange = (nextSelection: ComposerEditorSelection) => {
@@ -378,7 +384,7 @@ export function useComposerCommandMenu({
 
     if (trigger.kind === "slash-command") {
       const q = trigger.query.toLowerCase();
-      const visibleSkills = getProviderSkillsForSlashMenu(skills, true);
+      const visibleSkills = getProviderSkillsForSlashMenu(skills, true, disabledSkills);
       const commandItems = buildComposerSlashCommandItems({
         query: q,
         atMessageStart: trigger.rangeStart === 0,
@@ -392,6 +398,7 @@ export function useComposerCommandMenu({
               slashCommands: getProviderSlashCommandsForSlashMenu(
                 resolveProviderSlashCommandsForCwd(selectedProviderStatus, projectCwd),
                 visibleSkills,
+                disabledSkills,
               ),
             }
           : null,
@@ -411,7 +418,7 @@ export function useComposerCommandMenu({
     }
 
     if (trigger.kind === "skill") {
-      const enabledSkills = dedupeProviderSkillsByName(skills.filter(isProviderSkillUserInvocable));
+      const enabledSkills = getProviderSkillsForSlashMenu(skills, true, disabledSkills);
       const normalizedQuery = normalizeSearchQuery(trigger.query, {
         trimLeadingPattern: /^\p{Sc}+/u,
       });

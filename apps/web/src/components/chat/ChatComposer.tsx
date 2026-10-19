@@ -1,3 +1,4 @@
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
@@ -2330,9 +2331,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isSendDisabled = sendDisabledReason !== null;
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
   const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
-  const selectedProviderSkills = selectedProviderStatus
-    ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
-    : NO_PROVIDER_SKILLS;
+  const disabledSkills = resolveProjectSettings(settings, activeProjectId).settings.disabledSkills;
+  const selectedProviderSkills = getProviderSkillsForSlashMenu(
+    selectedProviderStatus
+      ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
+      : NO_PROVIDER_SKILLS,
+    true,
+    disabledSkills,
+  );
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
     : NO_PROVIDER_SLASH_COMMANDS;
@@ -2667,10 +2673,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const slashMenuSkills = getProviderSkillsForSlashMenu(
         selectedProviderSkills,
         settings.showSkillsInSlashMenu,
+        disabledSkills,
       );
       const providerSlashCommandItems = getProviderSlashCommandsForSlashMenu(
         selectedProviderSlashCommands,
         slashMenuSkills,
+        disabledSkills,
       ).map((command) => ({
         id: `provider-slash-command:${selectedProvider}:${command.name}`,
         type: "provider-slash-command" as const,

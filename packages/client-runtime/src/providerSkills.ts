@@ -41,17 +41,28 @@ export function isProviderSkillUserInvocable(
 export function getProviderSkillsForSlashMenu(
   skills: ReadonlyArray<ServerProviderSkill>,
   showSkillsInSlashMenu: boolean,
+  disabledSkills: ReadonlyArray<string> = [],
 ): ServerProviderSkill[] {
+  const disabled = new Set(disabledSkills.map((name) => name.trim().toLowerCase()));
   return showSkillsInSlashMenu
-    ? dedupeProviderSkillsByName(skills.filter(isProviderSkillUserInvocable))
+    ? dedupeProviderSkillsByName(
+        skills.filter(
+          (skill) =>
+            isProviderSkillUserInvocable(skill) && !disabled.has(skill.name.trim().toLowerCase()),
+        ),
+      )
     : [];
 }
 
 export function getProviderSlashCommandsForSlashMenu(
   slashCommands: ReadonlyArray<ServerProviderSlashCommand>,
   visibleSkills: ReadonlyArray<ServerProviderSkill>,
+  disabledSkills: ReadonlyArray<string> = [],
 ): ServerProviderSlashCommand[] {
-  const skillNames = new Set(visibleSkills.map((skill) => skill.name.trim().toLowerCase()));
+  const skillNames = new Set([
+    ...visibleSkills.map((skill) => skill.name.trim().toLowerCase()),
+    ...disabledSkills.map((name) => name.trim().toLowerCase()),
+  ]);
   return slashCommands.filter((command) => !skillNames.has(command.name.trim().toLowerCase()));
 }
 

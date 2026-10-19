@@ -303,3 +303,24 @@ describe("workspace provider snapshots", () => {
     );
   });
 });
+
+describe("Tools skill switches in composer menus", () => {
+  it("hides disabled skills and their slash aliases, then restores both after re-enabling", () => {
+    const skills = [
+      { name: "Review", path: "/skills/review/SKILL.md", enabled: true },
+      { name: "deploy", path: "/skills/deploy/SKILL.md", enabled: true },
+    ];
+    const commands = [{ name: "review" }, { name: "compact" }];
+    const disabled = ["REVIEW"];
+    const visible = getProviderSkillsForSlashMenu(skills, true, disabled);
+    expect(visible.map((skill) => skill.name)).toEqual(["deploy"]);
+    expect(getProviderSlashCommandsForSlashMenu(commands, visible, disabled)).toEqual([
+      { name: "compact" },
+    ]);
+    expect(getProviderSlashCommandsForSlashMenu(commands, [], disabled)).toEqual([
+      { name: "compact" },
+    ]);
+    expect(getProviderSkillsForSlashMenu(skills, true, [])).toEqual(skills);
+    expect(getProviderSlashCommandsForSlashMenu(commands, [], [])).toEqual(commands);
+  });
+});
