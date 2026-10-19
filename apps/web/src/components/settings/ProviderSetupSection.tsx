@@ -216,21 +216,15 @@ function ProviderSetupActions({
               {installation?.phase === "downloading" &&
               installation.totalBytes !== null &&
               installation.totalBytes > 0 ? (
-                <div
-                  role="progressbar"
+                <progress
                   aria-label="Antigravity download"
-                  aria-valuemin={0}
-                  aria-valuemax={installation.totalBytes}
-                  aria-valuenow={Math.min(installation.downloadedBytes, installation.totalBytes)}
-                  className="h-1 w-full overflow-hidden rounded-full bg-muted forced-colors:border"
-                >
-                  <div
-                    className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none forced-color-adjust-none"
-                    style={{
-                      width: `${Math.min(100, (installation.downloadedBytes / installation.totalBytes) * 100)}%`,
-                    }}
-                  />
-                </div>
+                  // Forced-colors mode paints every background Canvas, so the
+                  // native widget (which uses system colors) is the only fill
+                  // that stays visible there.
+                  className="block h-1 w-full appearance-none overflow-hidden rounded-full bg-muted forced-colors:appearance-auto [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-primary [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-primary"
+                  value={installation.downloadedBytes}
+                  max={installation.totalBytes}
+                />
               ) : null}
             </div>
             {!installActive &&
