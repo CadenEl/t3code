@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 
 import { assert, describe, it } from "@effect/vitest";
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { mergeUsage } from "@t3tools/shared/usageMerge";
@@ -1550,7 +1550,7 @@ describe("UsageService", () => {
           yield* Effect.promise(async () => {
             const stat = await NodeFSP.stat(transcript);
             await NodeFSP.writeFile(transcript, repaired);
-            await NodeFSP.utimes(transcript, stat.atime, new Date(stat.mtimeMs + 1000));
+            await NodeFSP.utimes(transcript, stat.atime, stat.mtimeMs / 1000 + 1);
           });
           verify(yield* resumed.readSummary(WINDOW), 32, 52, 0);
         }).pipe(
