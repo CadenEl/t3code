@@ -96,3 +96,12 @@ export function mcpServerVariableRecord(
   }
   return record;
 }
+
+export const isValidMcpServerName: (name: unknown) => name is McpServerName =
+  Schema.is(McpServerName);
+
+export function mcpServerTransportSummary(transport: McpServerTransport): string {
+  return transport.type === "stdio"
+    ? [transport.command, ...transport.args].join(" ")
+    : transport.url;
+}

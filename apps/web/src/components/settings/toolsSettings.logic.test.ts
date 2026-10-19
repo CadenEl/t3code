@@ -32,6 +32,19 @@ describe("MCP server editor", () => {
       ok: false,
       field: "name",
     });
+    expect(
+      mcpServerFromDraft(
+        {
+          ...draft,
+          env: [...draft.env, { ...draft.env[0]!, id: "duplicate", name: " API_TOKEN " }],
+        },
+        new Set(),
+      ),
+    ).toMatchObject({
+      ok: false,
+      field: "variables",
+      message: "Duplicate environment variable name: API_TOKEN.",
+    });
   });
 
   it("preserves an untouched secret and its original identity through an editor rename", () => {
@@ -69,6 +82,23 @@ describe("MCP server editor", () => {
           },
         ],
       },
+    });
+    expect(
+      mcpServerFromDraft(
+        {
+          ...draft,
+          headers: [
+            ...draft.headers,
+            { ...draft.headers[0]!, id: "duplicate", name: " authorization " },
+          ],
+        },
+        new Set(),
+        "docs",
+      ),
+    ).toMatchObject({
+      ok: false,
+      field: "variables",
+      message: "Duplicate header name: authorization.",
     });
     const replaced = {
       ...renamed,
@@ -146,4 +176,35 @@ it("preserves different destination headers in a URL-only bulk edit", () => {
     ],
   };
   expect(mcpServerTransportForTarget(renamed, initial, initial)).toEqual(renamed);
+  const mixedInitial = {
+    ...initial,
+    headers: [
+      { name: "Authorization", value: "public-value", sensitive: false },
+      { name: "X-Region", value: "east", sensitive: false },
+    ],
+  };
+  const mixedTarget = {
+    ...initial,
+    headers: [
+      { name: "Authorization", value: "", sensitive: true, valueRedacted: true },
+      { name: "X-Region", value: "west", sensitive: false },
+    ],
+  };
+  const mixedEdit = {
+    ...mixedInitial,
+    headers: [mixedInitial.headers[0]!, { ...mixedInitial.headers[1]!, value: "north" }],
+  };
+  expect(mcpServerTransportForTarget(mixedEdit, mixedInitial, mixedTarget, "docs")).toEqual({
+    ...mixedEdit,
+    headers: [
+      {
+        name: "Authorization",
+        value: "",
+        sensitive: true,
+        valueRedacted: true,
+        storedAs: { server: "docs", variable: "Authorization" },
+      },
+      { name: "X-Region", value: "north", sensitive: false },
+    ],
+  });
 });

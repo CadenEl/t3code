@@ -306,7 +306,7 @@ export function mcpServerDraftFrom(name: string, config: McpServerConfig): McpSe
 }
 
 /** Arguments on one line; an argument with whitespace or quotes is double-quoted. */
-export function formatArgs(args: ReadonlyArray<string>): string {
+function formatArgs(args: ReadonlyArray<string>): string {
   return args
     .map((arg) =>
       arg.length === 0 || /[\s"'\\]/.test(arg) ? `"${arg.replaceAll(/(["\\])/g, "\\$1")}"` : arg,
@@ -315,7 +315,7 @@ export function formatArgs(args: ReadonlyArray<string>): string {
 }
 
 /** Split an argument line on whitespace, honoring single and double quotes. */
-export function parseArgs(line: string): ReadonlyArray<string> {
+function parseArgs(line: string): ReadonlyArray<string> {
   const args: string[] = [];
   let current = "";
   let quote: '"' | "'" | null = null;
@@ -443,7 +443,13 @@ export function mcpServerTransportForTarget(
         value: destination.value,
         sensitive: destination.sensitive,
         ...(destination.valueRedacted ? { valueRedacted: true } : {}),
-        ...(storedAs && destination.valueRedacted ? { storedAs } : {}),
+        ...(destination.valueRedacted
+          ? storedAs
+            ? { storedAs }
+            : renamedFrom
+              ? { storedAs: { server: renamedFrom, variable: destination.name } }
+              : {}
+          : {}),
       };
     });
   }
@@ -452,7 +458,11 @@ export function mcpServerTransportForTarget(
 
 export type McpServerDraftResult =
   | { readonly ok: true; readonly name: string; readonly transport: McpServerTransport }
-  | { readonly ok: false; readonly field: "name" | "command" | "url"; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly field: "name" | "command" | "url" | "variables";
+      readonly message: string;
+    };
 
 /** `storedName` is the server's saved name when editing, so renames keep its secrets. */
 export function mcpServerFromDraft(
@@ -473,6 +483,20 @@ export function mcpServerFromDraft(
   }
   if (takenNames.has(name)) {
     return { ok: false, field: "name", message: "A server with this name already exists." };
+  }
+  const variableNames = new Set<string>();
+  for (const variable of draft.type === "stdio" ? draft.env : draft.headers) {
+    const name = variable.name.trim();
+    if (name.length === 0) continue;
+    const key = draft.type === "http" ? name.toLowerCase() : name;
+    if (variableNames.has(key)) {
+      return {
+        ok: false,
+        field: "variables",
+        message: `Duplicate ${draft.type === "stdio" ? "environment variable" : "header"} name: ${name}.`,
+      };
+    }
+    variableNames.add(key);
   }
   if (draft.type === "stdio") {
     const command = draft.command.trim();

@@ -164,9 +164,7 @@ function usePersistToolsPatch() {
           return;
         }
         written.current.set(target.environmentId, {
-          base:
-            appAtomRegistry.get(serverEnvironment.configValueAtom(target.environmentId))
-              ?.settings ?? pushed,
+          base: pushed,
           next: result.value,
         });
       };
@@ -258,22 +256,19 @@ function SkillsPanel() {
   const refresh = async (fresh: boolean) => {
     if (environmentId === null) return;
     setRefreshing(true);
-    try {
-      await Promise.all(
-        enabledProviders.map((provider) =>
-          refreshProviders({
-            environmentId,
-            input: {
-              instanceId: provider.instanceId,
-              ...(cwd === null ? {} : { cwd }),
-              ...(fresh ? { fresh: true } : {}),
-            },
-          }),
-        ),
-      );
-    } finally {
-      setRefreshing(false);
-    }
+    await Promise.all(
+      enabledProviders.map((provider) =>
+        refreshProviders({
+          environmentId,
+          input: {
+            instanceId: provider.instanceId,
+            ...(cwd === null ? {} : { cwd }),
+            ...(fresh ? { fresh: true } : {}),
+          },
+        }),
+      ),
+    );
+    setRefreshing(false);
   };
 
   // A project's skills live in its checkout, which each provider only scans

@@ -1,3 +1,4 @@
+import { Atom } from "effect/reactivity";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
@@ -22,7 +23,10 @@ vi.mock("../../state/use-composer-drafts", () => ({
 }));
 vi.mock("../../lib/uuid", () => ({ uuidv4: () => "context-id" }));
 vi.mock("../../state/server", () => ({
-  serverEnvironment: { refreshProviders: Symbol("refreshProviders") },
+  serverEnvironment: {
+    refreshProviders: Symbol("refreshProviders"),
+    configValueAtom: Atom.family((_environmentId: EnvironmentId | null) => Atom.make(null)),
+  },
 }));
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: () => refreshProviders,

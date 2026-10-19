@@ -202,6 +202,11 @@ export function McpServerDialog({
               variables={variables}
               onChange={setVariables}
             />
+            {error?.field === "variables" ? (
+              <p role="alert" className="text-xs text-destructive-foreground">
+                {error.message}
+              </p>
+            ) : null}
           </form>
         </DialogPanel>
         <DialogFooter variant="bare">
