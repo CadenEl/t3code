@@ -45,7 +45,7 @@ export function ThreadTitleInstructionsSettings() {
           placeholder={
             mixed
               ? "Mixed. Enter instructions to apply to all selected targets."
-              : "Use two to four words. Start with the ticket key when the message mentions one."
+              : "Keep titles to a few words. Lead with the main subject."
           }
           onBlur={(event) => {
             const value = event.target.value.trim();
