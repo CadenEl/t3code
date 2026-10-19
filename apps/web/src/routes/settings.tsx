@@ -157,8 +157,7 @@ function SettingsRouteLayout() {
         // even when the choice is "all", which is the absence of a key.
         void navigate({
           to: pathname,
-          search: (previous) => ({
-            ...previous,
+          search: () => ({
             project: next.project,
             machine: next.machine,
             checkout: next.checkout,

@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect, retainSearchParams } from "@tanstack/react-router";
 
 import { ToolsSettings } from "../components/settings/ToolsSettings";
 import { validateToolsSearch } from "../components/settings/toolsSettings.logic";
@@ -23,6 +23,7 @@ function SettingsToolsRoute() {
 
 export const Route = createFileRoute("/settings/tools")({
   validateSearch: validateToolsSearch,
+  search: { middlewares: [retainSearchParams(["tab"])] },
   beforeLoad: ({ location, search }) => {
     const tab =
       location.hash === "tools-mcp-servers"
