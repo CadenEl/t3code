@@ -69,6 +69,20 @@ export const DeviceHostConfigs = Schema.Array(DeviceHostConfig).check(
   ),
 );
 
+export const DeviceEasAccountInput = Schema.Struct({
+  /** A saved EAS host whose stored token is checked when no new token is given. */
+  hostId: Schema.optional(DeviceHostId),
+  accessToken: Schema.optional(TrimmedString),
+});
+export type DeviceEasAccountInput = typeof DeviceEasAccountInput.Type;
+
+export const DeviceEasAccount = Schema.Struct({
+  signedInAs: Schema.String,
+  credentialSource: Schema.Literals(["settings", "env", "eas-login"]),
+  apps: Schema.Array(Schema.Struct({ id: Schema.String, fullName: Schema.String })),
+});
+export type DeviceEasAccount = typeof DeviceEasAccount.Type;
+
 export const DeviceId = TrimmedNonEmptyString.check(Schema.isMaxLength(256));
 export type DeviceId = typeof DeviceId.Type;
 
