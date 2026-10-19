@@ -1248,6 +1248,7 @@ export function createDeviceStreamClient(
       videoGeneration++;
       controller?.abort();
       controller = null;
+      closePeer();
       closeDecoder();
       const retry = retryTimers.get("video");
       if (retry) clearTimeout(retry);
