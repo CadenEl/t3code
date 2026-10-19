@@ -720,7 +720,9 @@ function McpServersPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {removing?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              New agent sessions stop getting this server, and its stored secrets are deleted.
+              {removing?.replacesEnvironment
+                ? "New agent sessions use the environment configuration again, and this project's stored secrets are deleted. To stop using this server, turn off its inherited project switch."
+                : "New agent sessions stop getting this server, and its stored secrets are deleted."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
