@@ -41,6 +41,7 @@ describe("device host changes across environments", () => {
       kind: "eas" as const,
       id: "eas",
       label: "EAS Simulator",
+      accessToken: "",
       maxSessionMinutes: 30,
       idleMinutes: 10,
       maxConcurrentSessions: 2,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
-import { DeviceHostConfigs, deviceToolInstallMessage } from "./device.ts";
+import { DeviceHostConfigs, deviceToolInstallMessage, EasDeviceHostConfig } from "./device.ts";
+import { secretSettingsFields } from "./settings.ts";
 
 describe("device tool install progress", () => {
   it("distinguishes a new install from an upgrade and chooses versions numerically", () => {
@@ -36,11 +37,16 @@ describe("configured device hosts", () => {
         kind: "eas",
         id: "eas",
         label: "EAS Simulator",
+        accessToken: "",
         maxSessionMinutes: 30,
         idleMinutes: 10,
         maxConcurrentSessions: 2,
       },
     ]);
+  });
+
+  it("marks the EAS access token as a secret setting", () => {
+    expect(secretSettingsFields(EasDeviceHostConfig)).toEqual(["accessToken"]);
   });
 
   it("refuses sessions longer than EAS allows and ids shared across kinds", () => {
