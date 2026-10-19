@@ -94,7 +94,7 @@ it.effect("preserves installed status after probes and cleans failed agent activ
       }),
     );
     const host = yield* SshDeviceHost.make(
-      { id: "test", label: "Test", target: "test.example" },
+      { kind: "ssh", id: "test", label: "Test", target: "test.example" },
       () =>
         rejectConfig
           ? Effect.fail(
@@ -116,7 +116,12 @@ it.effect("preserves installed status after probes and cleans failed agent activ
       ),
     );
     yield* host.ensureReady(() => Effect.void);
-    yield* SshDeviceHost.probe({ id: "test", label: "Test", target: "test.example" }).pipe(
+    yield* SshDeviceHost.probe({
+      kind: "ssh",
+      id: "test",
+      label: "Test",
+      target: "test.example",
+    }).pipe(
       Effect.provide(ServerConfig.layerTest(home, home)),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
