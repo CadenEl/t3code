@@ -9,6 +9,7 @@ import {
   themeColorToHex,
   type ThemeColors,
 } from "../../themePalette";
+import { clerkAppearance } from "./clerkAppearance";
 
 function contrastRatio(first: string, second: string): number {
   const toRgb = (value: string) => {
@@ -51,6 +52,15 @@ const builtInThemeModes = [
 
 describe("clerkAppearance", () => {
   it.each(builtInThemeModes)("keeps Clerk text readable across a built-in palette", (colors) => {
+    expect(clerkAppearance.variables).toMatchObject({
+      colorForeground: "var(--contrast-foreground)",
+      colorBackground: "var(--card)",
+      colorMutedForeground: "var(--contrast-muted-foreground)",
+      colorMuted: "color-mix(in srgb, var(--card) 98%, var(--contrast-foreground))",
+      colorInputForeground: "var(--contrast-foreground)",
+      colorInput: "var(--secondary)",
+      colorPrimary: "var(--update-foreground)",
+    });
     const mutedSurface = mixThemeColors(colors.surface, colors.text, 0.98);
 
     expect(contrastRatio(colors.text, colors.surface)).toBeGreaterThanOrEqual(4.5);
