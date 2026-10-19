@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   mcpServerDraftFrom,
   mcpServerFromDraft,
+  mcpServerForTarget,
   mcpServerTransportForTarget,
   parseMcpServerJson,
 } from "./toolsSettings.logic";
@@ -137,6 +138,26 @@ it("preserves different destination headers in a URL-only bulk edit", () => {
     headers: [{ ...local.headers[0], storedAs: { server: "docs", variable: "X-Api-Key" } }],
   });
 
+  for (const enabled of [true, false]) {
+    const destination = { enabled, transport: local };
+    for (const renamedFrom of [undefined, "docs"]) {
+      expect(
+        mcpServerForTarget(
+          { enabled: !enabled, transport: edited },
+          initial,
+          destination,
+          renamedFrom,
+        ).enabled,
+      ).toBe(enabled);
+    }
+  }
+  expect(
+    mcpServerForTarget({ enabled: false, transport: edited }, undefined, undefined).enabled,
+  ).toBe(false);
+  expect(
+    mcpServerForTarget({ enabled: true, transport: edited }, undefined, undefined).enabled,
+  ).toBe(true);
+
   const sameHeader = {
     ...initial,
     headers: [{ name: "Authorization", value: "local-token", sensitive: false }],
@@ -207,4 +228,40 @@ it("preserves different destination headers in a URL-only bulk edit", () => {
       { name: "X-Region", value: "north", sensitive: false },
     ],
   });
+  const plainDraft = mcpServerDraftFrom("docs", { enabled: true, transport: mixedInitial });
+  const plainRename = mcpServerFromDraft(
+    {
+      ...plainDraft,
+      headers: plainDraft.headers.map((variable, index) =>
+        index === 0 ? { ...variable, name: "X-Account" } : variable,
+      ),
+    },
+    new Set(),
+    "docs",
+  );
+  if (!plainRename.ok) throw new Error("Expected a valid plain variable rename");
+  expect(
+    mcpServerForTarget({ enabled: true, transport: plainRename.transport }, mixedInitial, {
+      enabled: false,
+      transport: mixedInitial,
+    }).transport,
+  ).toEqual(plainRename.transport);
+  const differentPlainTarget = {
+    ...mixedInitial,
+    headers: mixedInitial.headers.map((variable, index) =>
+      index === 0 ? { ...variable, value: "destination-value" } : variable,
+    ),
+  };
+  expect(() =>
+    mcpServerForTarget({ enabled: true, transport: plainRename.transport }, mixedInitial, {
+      enabled: false,
+      transport: differentPlainTarget,
+    }),
+  ).toThrow("each environment");
+  expect(() =>
+    mcpServerForTarget({ enabled: true, transport: plainRename.transport }, mixedInitial, {
+      enabled: false,
+      transport: mixedTarget,
+    }),
+  ).toThrow("each environment");
 });

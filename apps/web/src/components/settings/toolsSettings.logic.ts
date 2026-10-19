@@ -375,6 +375,21 @@ function variablesFromDrafts(
   });
 }
 
+export function mcpServerForTarget(
+  edited: McpServerConfig,
+  initial: McpServerTransport | undefined,
+  target: McpServerProjectOverride | undefined,
+  renamedFrom?: string,
+): McpServerConfig {
+  const transport = mcpServerTransportForTarget(
+    edited.transport,
+    initial,
+    target?.transport,
+    renamedFrom,
+  );
+  return initial && target ? { ...target, transport } : { ...edited, transport };
+}
+
 // Keep destination credentials when the shared edit only changed the command or URL.
 export function mcpServerTransportForTarget(
   edited: McpServerTransport,
@@ -426,6 +441,23 @@ export function mcpServerTransportForTarget(
     }
     const before = new Map(original.map((variable) => [variable.name, variable]));
     const current = new Map(local.map((variable) => [variable.name, variable]));
+    const removed = original.filter(
+      (variable) =>
+        !next.some((edited) => (edited.storedAs?.variable ?? edited.name) === variable.name),
+    );
+    if (
+      next.some((variable) => !before.has(variable.storedAs?.variable ?? variable.name)) &&
+      removed.some((variable) => {
+        const destination = current.get(variable.name);
+        return (
+          destination?.value !== variable.value || destination?.sensitive !== variable.sensitive
+        );
+      })
+    ) {
+      throw new Error(
+        "Variable renames differ across environments. Edit this server in each environment.",
+      );
+    }
     mapped = next.map((variable) => {
       const sourceName = variable.storedAs?.variable ?? variable.name;
       const previous = before.get(sourceName);

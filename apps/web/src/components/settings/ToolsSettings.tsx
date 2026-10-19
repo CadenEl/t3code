@@ -45,6 +45,7 @@ import {
   groupSkillRows,
   isSkillDisabled,
   listMcpServerRows,
+  mcpServerForTarget,
   mcpServerTransportForTarget,
   type McpServerRow,
   SKILL_GROUP_LABELS,
@@ -532,10 +533,10 @@ function McpServersPanel() {
       if (previousName !== undefined && existing[previousName]?.transport === undefined) {
         return null;
       }
-      const targetTransport = mcpServerTransportForTarget(
-        transport,
+      const targetConfig = mcpServerForTarget(
+        { enabled, transport },
         initial,
-        existing[previousName ?? name]?.transport,
+        existing[previousName ?? name],
         renamedFrom,
       );
       if (targetProject === null) {
@@ -544,13 +545,13 @@ function McpServersPanel() {
             ...(previousName !== undefined && previousName !== name
               ? { [previousName]: null }
               : {}),
-            [name]: { enabled, transport: targetTransport },
+            [name]: targetConfig,
           },
         };
       }
       const entries: Record<string, McpServerProjectOverride> = { ...existing };
       if (previousName !== undefined && previousName !== name) delete entries[previousName];
-      entries[name] = { enabled, transport: targetTransport };
+      entries[name] = targetConfig;
       return projectOverridePatch(settings, targetProject, "mcpServers", entries);
     });
     return true;
