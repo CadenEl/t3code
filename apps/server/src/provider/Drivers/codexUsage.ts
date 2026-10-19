@@ -212,6 +212,14 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
     return null;
   }
 
+  if (
+    cumulative !== null &&
+    previous !== null &&
+    CODEX_USAGE_FIELDS.every((key) => cumulative[key] === previous[key])
+  ) {
+    return null;
+  }
+
   if (last.total_tokens !== last.input_tokens + last.output_tokens) {
     state.malformedRecords += 1;
     return null;
@@ -219,9 +227,6 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
 
   const signature = JSON.stringify(last);
   if (cumulative !== null) {
-    if (previous !== null && CODEX_USAGE_FIELDS.every((key) => cumulative[key] === previous[key])) {
-      return null;
-    }
     if (
       !CODEX_USAGE_FIELDS.every((key) => cumulative[key] - (previous?.[key] ?? 0) === last[key])
     ) {
