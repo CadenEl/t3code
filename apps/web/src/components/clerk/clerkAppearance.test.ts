@@ -60,6 +60,7 @@ describe("clerkAppearance", () => {
       colorInputForeground: "var(--contrast-foreground)",
       colorInput: "var(--secondary)",
       colorPrimary: "var(--update-foreground)",
+      colorPrimaryForeground: "var(--card)",
     });
     const mutedSurface = mixThemeColors(colors.surface, colors.text, 0.98);
 
