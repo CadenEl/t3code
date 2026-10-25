@@ -37,8 +37,7 @@ export function HtmlRenderFrame(props: {
       if (entry) setWidth(entry.contentRect.width);
     });
   }, []);
-  // Client fonts can wrap a page taller than the server measured it; a frame
-  // left short would scroll inside the thread and take the reader's scroll.
+  // Client fonts can exceed the server-measured height and cause nested scrolling.
   const [contentHeight, setContentHeight] = useState<number>();
   const height = htmlRenderFrameHeight(props.htmlRender, width, contentHeight);
   const fileName = htmlRenderFileName(title);
@@ -49,9 +48,7 @@ export function HtmlRenderFrame(props: {
     mimeType: "text/html",
     disposition: "inline" as const,
   };
-  // A cached URL with life left is reused, so the browser's cache serves the
-  // page again; one near expiry is minted afresh, since a frame cannot report a
-  // failed load.
+  // Re-mint near-expiry URLs because frames cannot report failed loads.
   const [src, setSrc] = useState<string | null>(null);
   const srcExpiresAt = useRef(0);
   const [expandedSrc, setExpandedSrc] = useState<string | null>(null);
@@ -67,8 +64,7 @@ export function HtmlRenderFrame(props: {
   const cachedExpiresAt = assetUrl._tag === "Success" ? assetUrl.expiresAt : 0;
   const cacheFailed = assetUrl._tag === "Failure";
   const refresh = useAssetUrlRefresh(props.environmentId, resource);
-  // At most one mint per mount: expiry is server time and the check uses the
-  // client clock, so a skewed clock must not mint again on every update.
+  // Mint once per mount to prevent clock skew from causing repeated mints.
   const minting = useRef(false);
   useEffect(() => {
     if (src !== null || minting.current) return;
@@ -100,8 +96,7 @@ export function HtmlRenderFrame(props: {
             threadRef={props.threadRef}
             className="block size-full"
             onContentHeight={setContentHeight}
-            // A remounted frame starts at the capped height until the page
-            // reports again; only a page past the fit cap scrolls vertically.
+            // Until the page reports, a remounted frame sits at the height cap.
             fitted={contentHeight === undefined || contentHeight <= HTML_RENDER_MAX_FIT_HEIGHT}
             onFullscreenChange={onFullscreenChange}
           />
