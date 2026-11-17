@@ -351,7 +351,8 @@ the **Working** section, including after the agent pushes a fix. Once every chec
 including review bots that report as checks, the thread returns to your inbox: what happens next is
 up to a person. That includes a workflow waiting for a maintainer to approve it, which runs only
 once someone does. The watch stays on and still wakes the agent on new comments, failed checks or
-conflicts, and a watched thread never auto-settles.
+conflicts, and a watched thread never auto-settles. To keep it in **Working** until the watch ends,
+see [Fold working threads](thread-sidebar.md#fold-working-threads-beta).
 
 Cross-repository links use a project on the same host. Azure DevOps reviews require a project checked
 out from the matching organization and repository.

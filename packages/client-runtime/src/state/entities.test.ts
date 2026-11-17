@@ -98,6 +98,38 @@ describe("V2 client presentation", () => {
     ).toBeNull();
   });
 
+  it("keeps a watched pull request with finished checks in Working only when asked", () => {
+    const runId = RunId.make("run-watch-green");
+    const finished = {
+      ...v2ThreadShell,
+      latestRunId: runId,
+      activeRunId: null,
+      status: "completed" as const,
+      pendingBackgroundTasks: [
+        { taskId: "pull-request-watch:github.com/acme/app#1", kind: "monitor" as const },
+      ],
+    };
+    const watched = presentThreadShell(environmentId, finished);
+    expect(isThreadWorking(watched)).toBe(false);
+    expect(isThreadWorking(watched, true)).toBe(true);
+    const failed = presentThreadShell(environmentId, { ...finished, status: "failed" });
+    expect(isThreadWorking(failed, true)).toBe(false);
+    const asking = presentThreadShell(environmentId, {
+      ...finished,
+      pendingRuntimeRequest: {
+        id: RuntimeRequestId.make("request-watch-question"),
+        kind: "user_input",
+        createdAt: v2ThreadShell.updatedAt,
+      },
+    });
+    expect(isThreadWorking(asking, true)).toBe(false);
+    const guestWaiting = presentThreadShell(environmentId, {
+      ...finished,
+      pendingGuestMessageCount: 1,
+    });
+    expect(isThreadWorking(guestWaiting, true)).toBe(false);
+  });
+
   it("keeps an imported thread that never ran out of Working", () => {
     const imported = presentThreadShell(environmentId, {
       ...v2ThreadShell,

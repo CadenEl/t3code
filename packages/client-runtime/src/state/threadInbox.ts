@@ -1,4 +1,6 @@
 // @effect-diagnostics globalTimers:off - Shelf placement timers run in web and native clients, outside an Effect runtime.
+import { isPullRequestWatchTask } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+
 import { threadRuntimeIsActive, type EnvironmentThreadShell } from "./models.ts";
 import { toSortableTimestamp } from "./threadSort.ts";
 import { effectiveSnoozed } from "./threadSettled.ts";
@@ -12,12 +14,28 @@ type WorkingThreadInput = Pick<
   | "interactionMode"
   | "latestRun"
   | "runtime"
+  | "pendingBackgroundTasks"
+  | "pendingGuestMessageCount"
 >;
 
-export function isThreadWorking(thread: WorkingThreadInput): boolean {
+/**
+ * The server holds a watched pull request's thread only while checks run. `keepWatchedPullRequests`
+ * places it in Working until the watch ends, for watches that wait on a reviewer.
+ */
+export function isThreadWorking(
+  thread: WorkingThreadInput,
+  keepWatchedPullRequests = false,
+): boolean {
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return false;
   if (thread.pendingSubagentRequest != null) return false;
-  if (!threadRuntimeIsActive(thread.runtime) && thread.runtime?.status !== "idle") return false;
+  const watching =
+    keepWatchedPullRequests &&
+    thread.latestRun?.status !== "failed" &&
+    (thread.pendingGuestMessageCount ?? 0) === 0 &&
+    thread.pendingBackgroundTasks.some(isPullRequestWatchTask);
+  if (!watching && !threadRuntimeIsActive(thread.runtime) && thread.runtime?.status !== "idle") {
+    return false;
+  }
   const run = thread.latestRun;
   const runSettled =
     run !== null &&
@@ -155,6 +173,9 @@ export function createInboxReturnTracker() {
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let version = 0;
+  let keepWatchedPullRequests = false;
+  const workingNow = (thread: WorkingThreadInput) =>
+    isThreadWorking(thread, keepWatchedPullRequests);
   const now = () => {
     // @effect-diagnostics-next-line globalDate:off - The grace deadline is wall-clock time shared by web and native clients.
     return Date.now();
@@ -192,7 +213,10 @@ export function createInboxReturnTracker() {
       };
     },
     getSnapshot: () => version,
-    observe(threads: readonly TrackedInboxThread[] | null): {
+    observe(
+      threads: readonly TrackedInboxThread[] | null,
+      keepWatched = false,
+    ): {
       readonly isWorking: (thread: WorkingThreadInput & ThreadKeyInput) => boolean;
       readonly returnedAt: (thread: ThreadKeyInput) => number | undefined;
     } {
@@ -203,6 +227,7 @@ export function createInboxReturnTracker() {
         returns.clear();
         return { isWorking: isThreadWorking, returnedAt: () => undefined };
       }
+      keepWatchedPullRequests = keepWatched;
       const present = new Set<string>();
       const at = now();
       // @effect-diagnostics-next-line globalDate:off - Snooze checks compare wall-clock ISO times.
@@ -211,7 +236,7 @@ export function createInboxReturnTracker() {
         const key = keyOf(thread);
         present.add(key);
         const previous = states.get(key);
-        const actual = isThreadWorking(thread);
+        const actual = workingNow(thread);
         const placement =
           actual || previous?.working
             ? JSON.stringify([
@@ -262,12 +287,12 @@ export function createInboxReturnTracker() {
       states.forEach((state, key) => observedWorking.set(key, state.working));
       const observedReturns = new Map(returns);
       return {
-        isWorking: (thread) => observedWorking.get(keyOf(thread)) ?? isThreadWorking(thread),
+        isWorking: (thread) => observedWorking.get(keyOf(thread)) ?? workingNow(thread),
         returnedAt: (thread) => observedReturns.get(keyOf(thread)),
       };
     },
     isWorking: (thread: WorkingThreadInput & ThreadKeyInput) =>
-      states.get(keyOf(thread))?.working ?? isThreadWorking(thread),
+      states.get(keyOf(thread))?.working ?? workingNow(thread),
     returnedAt: (thread: ThreadKeyInput) => returns.get(keyOf(thread)),
   };
 }

@@ -12,6 +12,8 @@ export function useThreadListV2ShelfPreferences() {
   const settledShelfExpanded =
     loaded && preferencesResult.value.threadListSettledShelfExpanded === true;
   const workingShelfEnabled = loaded && preferencesResult.value.workingShelfEnabled !== false;
+  const keepWatchedPullRequests =
+    loaded && preferencesResult.value.workingShelfKeepsWatchedPullRequests === true;
   const workingShelfExpanded =
     loaded && preferencesResult.value.threadListWorkingShelfExpanded === true;
 
@@ -47,6 +49,7 @@ export function useThreadListV2ShelfPreferences() {
     snoozedShelfExpanded,
     workingShelfEnabled,
     workingShelfExpanded,
+    keepWatchedPullRequests,
     toggleSettledShelf,
     toggleSnoozedShelf,
     toggleWorkingShelf,

@@ -496,6 +496,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
       ? ["Working section"]
       : []),
+    ...(settings.sidebarWorkingShelfKeepsWatchedPullRequests !==
+    DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfKeepsWatchedPullRequests
+      ? ["Keep watched PRs in Working"]
+      : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
       ? ["Auto-settle inactive threads"]
       : []),
@@ -680,6 +684,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+      sidebarWorkingShelfKeepsWatchedPullRequests:
+        DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfKeepsWatchedPullRequests,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
@@ -934,6 +940,40 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        {settings.sidebarWorkingShelfEnabled ? (
+          <SettingsRow
+            {...setting("working-shelf-watched-prs")}
+            description={
+              <T>
+                A thread watching a pull request stays in Working until the watch ends, not only
+                while checks run. It still returns when it needs you.
+              </T>
+            }
+            resetAction={
+              settings.sidebarWorkingShelfKeepsWatchedPullRequests !==
+              DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfKeepsWatchedPullRequests ? (
+                <SettingResetButton
+                  label="keep watched PRs in Working"
+                  onClick={() =>
+                    updateSettings({
+                      sidebarWorkingShelfKeepsWatchedPullRequests:
+                        DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfKeepsWatchedPullRequests,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.sidebarWorkingShelfKeepsWatchedPullRequests}
+                onCheckedChange={(checked) =>
+                  updateSettings({ sidebarWorkingShelfKeepsWatchedPullRequests: Boolean(checked) })
+                }
+                aria-label={gt("Keep watched PRs in Working")}
+              />
+            }
+          />
+        ) : null}
       </SettingsSection>
 
       <SettingsSection id="confirmations" title={gt("Confirmations")}>

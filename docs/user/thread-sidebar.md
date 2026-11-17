@@ -145,6 +145,10 @@ This is on by default. Turn it off with **Settings → General → Working secti
 or **Settings → General → Working section** on iOS and Android. Each device keeps its own
 choice.
 
+To keep a watched pull request's thread in Working until the watch ends, for example while you wait
+on a reviewer, turn on **Keep watched PRs in Working** under the same setting. The thread still
+returns when it needs an approval or answer, or when its run fails.
+
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.
 

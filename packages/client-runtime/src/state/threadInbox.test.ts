@@ -21,6 +21,7 @@ function thread(id: string, working: boolean) {
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     interactionMode: "default" as const,
+    pendingBackgroundTasks: [],
     runtime: working
       ? {
           status: "running" as const,

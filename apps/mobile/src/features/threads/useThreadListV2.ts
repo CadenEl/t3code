@@ -34,9 +34,10 @@ type LayoutInput = Parameters<typeof buildThreadListV2Items>[0];
  */
 function observeInbox(
   threads: Parameters<typeof threadListInboxReturns.observe>[0],
+  keepWatchedPullRequests: boolean,
   _expiredGraceVersion: number,
 ) {
-  return threadListInboxReturns.observe(threads);
+  return threadListInboxReturns.observe(threads, keepWatchedPullRequests);
 }
 
 /**
@@ -62,11 +63,12 @@ export function useThreadListV2(input: {
   readonly shelfPreferencesLoaded: boolean;
   readonly workingShelfEnabled: boolean;
   readonly workingShelfExpanded: boolean;
+  readonly keepWatchedPullRequests: boolean;
   readonly snoozedShelfExpanded: boolean;
   readonly settledShelfExpanded: boolean;
   readonly selectedThreadKey: string | null;
 }) {
-  const { threads, workingShelfEnabled } = input;
+  const { threads, workingShelfEnabled, keepWatchedPullRequests } = input;
   const layoutTime = useMemo(
     () => threadListV2LayoutTime({ threads, now: input.now, searchQuery: input.searchQuery }),
     [threads, input.now, input.searchQuery],
@@ -77,8 +79,8 @@ export function useThreadListV2(input: {
     threadListInboxReturns.getSnapshot,
   );
   const inbox = useMemo(
-    () => observeInbox(workingShelfEnabled ? threads : null, inboxVersion),
-    [threads, workingShelfEnabled, inboxVersion],
+    () => observeInbox(workingShelfEnabled ? threads : null, keepWatchedPullRequests, inboxVersion),
+    [threads, workingShelfEnabled, keepWatchedPullRequests, inboxVersion],
   );
   // Compute move availability per section; per-row planning is quadratic.
   const moveAvailability = useMemo(() => {

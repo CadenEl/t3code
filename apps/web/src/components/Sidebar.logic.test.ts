@@ -1026,6 +1026,7 @@ describe("Working shelf (beta)", () => {
     interactionMode: "default" as const,
     latestRun: makeLatestRun(),
     runtime: null,
+    pendingBackgroundTasks: [],
   };
   const waiting = {
     ...idle,

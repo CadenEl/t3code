@@ -199,6 +199,9 @@ export function WorkingSectionSettings() {
   const preferences = useAtomValue(mobilePreferencesAtom);
   const workingShelfEnabled =
     AsyncResult.isSuccess(preferences) && preferences.value.workingShelfEnabled !== false;
+  const keepWatchedPullRequests =
+    AsyncResult.isSuccess(preferences) &&
+    preferences.value.workingShelfKeepsWatchedPullRequests === true;
 
   return (
     <View className="gap-3">
@@ -209,6 +212,17 @@ export function WorkingSectionSettings() {
           value={workingShelfEnabled}
           onValueChange={(value) => savePreferences({ workingShelfEnabled: value })}
         />
+        {workingShelfEnabled ? (
+          <SettingsSwitchRow
+            icon="eye"
+            label="Keep watched PRs in Working"
+            subtitle="A thread watching a pull request stays in Working until the watch ends, not only while checks run."
+            value={keepWatchedPullRequests}
+            onValueChange={(value) =>
+              savePreferences({ workingShelfKeepsWatchedPullRequests: value })
+            }
+          />
+        ) : null}
       </SettingsSection>
       <Text className="px-2 text-sm text-foreground-muted">
         Fold working and monitoring threads into a Working section. They return to the top of the
